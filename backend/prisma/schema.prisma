@@ -1,0 +1,152 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                String    @id @default(uuid())
+  email             String    @unique
+  phone             String    @unique
+  passwordHash      String
+  firstName         String?
+  lastName          String?
+  role              String    @default("staff") // admin, staff, customer
+  loginId           String?   @unique           // e.g. ADM01, STF01, CST01
+  isApproved        Boolean   @default(true)
+  staffPermission   String    @default("EDIT")  // EDIT, ENTER_VIEW
+  isDefaultPassword Boolean   @default(true)
+  linkedConsignorId String?
+  linkedConsigneeId String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+}
+
+model ConsignorMaster {
+  id           String             @id @default(uuid())
+  name         String
+  origin       String
+  gstn         String
+  mobile       String
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+  consignments GoodsConsignment[]
+}
+
+model ConsigneeMaster {
+  id           String             @id @default(uuid())
+  name         String
+  destination  String
+  gstn         String
+  mobile       String
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+  consignments GoodsConsignment[]
+}
+
+model LorryMaster {
+  id                   String              @id @default(uuid())
+  lorryNumber          String              @unique
+  lorryName            String
+  ownerName            String
+  ownerContact         String
+  driverName           String
+  driverContact        String
+  drivingLicenseNumber String
+  createdAt            DateTime            @default(now())
+  updatedAt            DateTime            @updatedAt
+  dispatches           GoodsDispatchMemo[]
+}
+
+model GoodsConsignment {
+  id                  String          @id @default(uuid())
+  gcNumber            String          @unique // e.g. D02247
+  date                DateTime        @default(now())
+  consignorId         String
+  consigneeId         String
+  fromCity            String          @default("SIVAKASI")
+  toCity              String
+  invoiceNo           String
+  invoiceDate         DateTime?
+  value               Float           @default(0.0) // Cargo Value
+  mark                String?
+  godown              String?
+  delivery            String?
+  hamali              Float           @default(0.0)
+  stCharges           Float           @default(0.0)
+  others              Float           @default(0.0)
+  charWt              Float           @default(0.0)
+  rateKg              Float           @default(0.0)
+  freight             Float           @default(0.0) // WT * Rate
+  serviceTaxPercent   Float           @default(5.0)
+  serviceTax          Float           @default(0.0) // Freight * ST%
+  total               Float           @default(0.0) // Value + Freight + ST + Hamali + StCharges + Others
+  paymentStatus       String          @default("To/Pay") // To/Pay, Paid, TBB
+  quantity            Int             @default(0) // Total package count
+  saidToContainCode   String? // 1, 2, 3, 4, 5
+  saidToContainDesc   String? // Fireworks, Caps, etc.
+  remarks             String?
+  printType           String          @default("LORRY COPY")
+  serviceTaxPayableBy String          @default("Consignee") // Consignee, Consignor, Transporter
+  approvalStatus      String          @default("APPROVED") // APPROVED, PENDING_APPROVAL, REJECTED
+  enteredById         String?
+  enteredByName       String?
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
+
+  consignor           ConsignorMaster @relation(fields: [consignorId], references: [id])
+  consignee           ConsigneeMaster @relation(fields: [consigneeId], references: [id])
+  gdmItems            GDMItem[]
+}
+
+model GoodsDispatchMemo {
+  id              String             @id @default(uuid())
+  gdmNumber       String             @unique // e.g. D00142 (auto-generated)
+  gdmDate         DateTime           @default(now())
+  fromCity        String             @default("SIVAKASI")
+  toCity          String
+  lorryId         String
+  remarks         String?
+  totalQty        Int                @default(0) // Sum of consignment quantities
+  totalDesp       Int                @default(0) // Sum of dispatched quantities
+  totalServiceTax Float              @default(0.0) // Sum of service taxes
+  deliveryStatus  String             @default("pending") // pending, loaded, in_transit, delivered
+  approvalStatus  String             @default("APPROVED") // APPROVED, PENDING_APPROVAL, REJECTED
+  enteredById     String?
+  enteredByName   String?
+  lastUpdatedBy   String?
+  lastUpdatedByName String?
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
+  lorry           LorryMaster        @relation(fields: [lorryId], references: [id])
+  items           GDMItem[]
+  messages        TransportMessage[]
+}
+
+model GDMItem {
+  id                 String            @id @default(uuid())
+  gdmId              String
+  goodsConsignmentId String
+  qty                Int               @default(0) // total qty of consignment
+  desp               Int               @default(0) // loaded qty in this lorry
+  serviceTax         Float             @default(0.0) // proportional service tax for this load
+
+  gdm                GoodsDispatchMemo @relation(fields: [gdmId], references: [id], onDelete: Cascade)
+  consignment        GoodsConsignment  @relation(fields: [goodsConsignmentId], references: [id], onDelete: Cascade)
+}
+
+model TransportMessage {
+  id              String            @id @default(uuid())
+  gdmId           String
+  senderId        String
+  senderName      String
+  receiverContact String
+  content         String
+  createdAt       DateTime          @default(now())
+
+  gdm             GoodsDispatchMemo @relation(fields: [gdmId], references: [id], onDelete: Cascade)
+}
