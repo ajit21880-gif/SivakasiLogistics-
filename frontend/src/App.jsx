@@ -1,4 +1,6 @@
 import React, { useEffect, useState } from 'react'
+const API_URL = import.meta.env.VITE_API_URL || API_URL + '';
+
 
 export default function App() {
   // Theme & Auth State
@@ -179,13 +181,13 @@ export default function App() {
   async function fetchMasters() {
     try {
       const headers = { Authorization: 'Bearer ' + token }
-      const crRes = await fetch('http://localhost:5000/v1/master/consignors', { headers })
+      const crRes = await fetch(API_URL + '/v1/master/consignors', { headers })
       if (crRes.ok) setConsignors((await crRes.json()).data || [])
 
-      const ceRes = await fetch('http://localhost:5000/v1/master/consignees', { headers })
+      const ceRes = await fetch(API_URL + '/v1/master/consignees', { headers })
       if (ceRes.ok) setConsignees((await ceRes.json()).data || [])
 
-      const lrRes = await fetch('http://localhost:5000/v1/master/lorries', { headers })
+      const lrRes = await fetch(API_URL + '/v1/master/lorries', { headers })
       if (lrRes.ok) setLorries((await lrRes.json()).data || [])
     } catch (err) {
       console.error(err)
@@ -194,7 +196,7 @@ export default function App() {
 
   async function fetchConsignments() {
     try {
-      const res = await fetch('http://localhost:5000/v1/gc', {
+      const res = await fetch(API_URL + '/v1/gc', {
         headers: { Authorization: 'Bearer ' + token }
       })
       if (res.ok) setConsignments((await res.json()).data || [])
@@ -206,7 +208,7 @@ export default function App() {
   async function fetchGdmList() {
     setLoading(true)
     try {
-      const res = await fetch('http://localhost:5000/v1/gdm', {
+      const res = await fetch(API_URL + '/v1/gdm', {
         headers: { Authorization: 'Bearer ' + token }
       })
       if (res.ok) setGdmList((await res.json()).data || [])
@@ -219,7 +221,7 @@ export default function App() {
 
   async function fetchAuditLogs() {
     try {
-      const res = await fetch('http://localhost:5000/v1/gdm/audit-report', {
+      const res = await fetch(API_URL + '/v1/gdm/audit-report', {
         headers: { Authorization: 'Bearer ' + token }
       })
       if (res.ok) setAuditLogs((await res.json()).data || [])
@@ -231,19 +233,19 @@ export default function App() {
   async function fetchAdminApprovals() {
     try {
       const headers = { Authorization: 'Bearer ' + token }
-      const userRes = await fetch('http://localhost:5000/v1/auth/users/pending', { headers })
+      const userRes = await fetch(API_URL + '/v1/auth/users/pending', { headers })
       if (userRes.ok) setPendingUsers((await userRes.json()).data || [])
 
-      const staffRes = await fetch('http://localhost:5000/v1/auth/users/staff', { headers })
+      const staffRes = await fetch(API_URL + '/v1/auth/users/staff', { headers })
       if (staffRes.ok) setStaffList((await staffRes.json()).data || [])
 
-      const customerRes = await fetch('http://localhost:5000/v1/auth/users/customers', { headers })
+      const customerRes = await fetch(API_URL + '/v1/auth/users/customers', { headers })
       if (customerRes.ok) setCustomerList((await customerRes.json()).data || [])
 
-      const pendingGcRes = await fetch('http://localhost:5000/v1/gc?status=PENDING_APPROVAL', { headers })
+      const pendingGcRes = await fetch(API_URL + '/v1/gc?status=PENDING_APPROVAL', { headers })
       if (pendingGcRes.ok) setPendingGcs((await pendingGcRes.json()).data || [])
 
-      const pendingGdmRes = await fetch('http://localhost:5000/v1/gdm?status=PENDING_APPROVAL', { headers })
+      const pendingGdmRes = await fetch(API_URL + '/v1/gdm?status=PENDING_APPROVAL', { headers })
       if (pendingGdmRes.ok) setPendingGdms((await pendingGdmRes.json()).data || [])
     } catch (err) {
       console.error(err)
@@ -252,7 +254,7 @@ export default function App() {
 
   async function fetchChatLogs(gdmId) {
     try {
-      const res = await fetch(`http://localhost:5000/v1/messages/${gdmId}`, {
+      const res = await fetch(`${API_URL}/v1/messages/${gdmId}`, {
         headers: { Authorization: 'Bearer ' + token }
       })
       if (res.ok) setChatMessages((await res.json()).data || [])
@@ -263,7 +265,7 @@ export default function App() {
 
   async function fetchGcDispatches(gcId) {
     try {
-      const res = await fetch(`http://localhost:5000/v1/gc/${gcId}/dispatches`, {
+      const res = await fetch(`${API_URL}/v1/gc/${gcId}/dispatches`, {
         headers: { Authorization: 'Bearer ' + token }
       })
       if (res.ok) setGcDispatches((await res.json()).data || [])
@@ -279,7 +281,7 @@ export default function App() {
     setAuthError('')
     setAuthSuccess('')
     try {
-      const res = await fetch('http://localhost:5000/v1/auth/login', {
+      const res = await fetch(API_URL + '/v1/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -312,7 +314,7 @@ export default function App() {
     }
 
     try {
-      const res = await fetch('http://localhost:5000/v1/auth/register', {
+      const res = await fetch(API_URL + '/v1/auth/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -343,7 +345,7 @@ export default function App() {
   async function handleGoogleLogin() {
     setAuthError('')
     try {
-      const res = await fetch('http://localhost:5000/v1/auth/google', {
+      const res = await fetch(API_URL + '/v1/auth/google', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -386,7 +388,7 @@ export default function App() {
     }
 
     try {
-      const res = await fetch('http://localhost:5000/v1/auth/change-password', {
+      const res = await fetch(API_URL + '/v1/auth/change-password', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -446,7 +448,7 @@ export default function App() {
     }
 
     try {
-      const url = gcForm.id ? `http://localhost:5000/v1/gc/${gcForm.id}` : 'http://localhost:5000/v1/gc'
+      const url = gcForm.id ? `${API_URL}/v1/gc/${gcForm.id}` : API_URL + '/v1/gc'
       const method = gcForm.id ? 'PUT' : 'POST'
 
       const res = await fetch(url, {
@@ -516,7 +518,7 @@ export default function App() {
     }
 
     try {
-      const url = gdmForm.id ? `http://localhost:5000/v1/gdm/${gdmForm.id}` : 'http://localhost:5000/v1/gdm'
+      const url = gdmForm.id ? `${API_URL}/v1/gdm/${gdmForm.id}` : API_URL + '/v1/gdm'
       const method = gdmForm.id ? 'PUT' : 'POST'
 
       const res = await fetch(url, {
@@ -583,7 +585,7 @@ export default function App() {
   // Update GDM status (Admin/Staff only)
   async function handleUpdateGdmStatus(gdmId, newStatus) {
     try {
-      const res = await fetch(`http://localhost:5000/v1/gdm/${gdmId}`, {
+      const res = await fetch(`${API_URL}/v1/gdm/${gdmId}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -651,7 +653,7 @@ export default function App() {
       }
 
       // Hit specific bulk endpoint
-      const res = await fetch(`http://localhost:5000/v1/master/${importType}/bulk`, {
+      const res = await fetch(`${API_URL}/v1/master/${importType}/bulk`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -674,7 +676,7 @@ export default function App() {
   // --- ADMIN ACCESS CONTROL & APPROVALS (Requirement 3, 5, 6) ---
   async function handleApproveUser(userId) {
     try {
-      const res = await fetch(`http://localhost:5000/v1/auth/users/${userId}/approve`, {
+      const res = await fetch(`${API_URL}/v1/auth/users/${userId}/approve`, {
         method: 'POST',
         headers: { Authorization: 'Bearer ' + token }
       })
@@ -688,7 +690,7 @@ export default function App() {
 
   async function handleRejectUser(userId) {
     try {
-      const res = await fetch(`http://localhost:5000/v1/auth/users/${userId}/reject`, {
+      const res = await fetch(`${API_URL}/v1/auth/users/${userId}/reject`, {
         method: 'POST',
         headers: { Authorization: 'Bearer ' + token }
       })
@@ -702,7 +704,7 @@ export default function App() {
 
   async function handleUpdateStaffPermission(userId, newPermission) {
     try {
-      const res = await fetch(`http://localhost:5000/v1/auth/users/${userId}/staff-permissions`, {
+      const res = await fetch(`${API_URL}/v1/auth/users/${userId}/staff-permissions`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -720,7 +722,7 @@ export default function App() {
 
   async function handleLinkCustomer(userId, consignorId, consigneeId) {
     try {
-      const res = await fetch(`http://localhost:5000/v1/auth/users/${userId}/link-customer`, {
+      const res = await fetch(`${API_URL}/v1/auth/users/${userId}/link-customer`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -741,7 +743,7 @@ export default function App() {
 
   async function handleApproveGc(gcId) {
     try {
-      const res = await fetch(`http://localhost:5000/v1/gc/${gcId}/approve`, {
+      const res = await fetch(`${API_URL}/v1/gc/${gcId}/approve`, {
         method: 'POST',
         headers: { Authorization: 'Bearer ' + token }
       })
@@ -756,7 +758,7 @@ export default function App() {
 
   async function handleRejectGc(gcId) {
     try {
-      const res = await fetch(`http://localhost:5000/v1/gc/${gcId}/reject`, {
+      const res = await fetch(`${API_URL}/v1/gc/${gcId}/reject`, {
         method: 'POST',
         headers: { Authorization: 'Bearer ' + token }
       })
@@ -771,7 +773,7 @@ export default function App() {
 
   async function handleApproveGdm(gdmId) {
     try {
-      const res = await fetch(`http://localhost:5000/v1/gdm/${gdmId}/approve`, {
+      const res = await fetch(`${API_URL}/v1/gdm/${gdmId}/approve`, {
         method: 'POST',
         headers: { Authorization: 'Bearer ' + token }
       })
@@ -786,7 +788,7 @@ export default function App() {
 
   async function handleRejectGdm(gdmId) {
     try {
-      const res = await fetch(`http://localhost:5000/v1/gdm/${gdmId}/reject`, {
+      const res = await fetch(`${API_URL}/v1/gdm/${gdmId}/reject`, {
         method: 'POST',
         headers: { Authorization: 'Bearer ' + token }
       })
@@ -804,7 +806,7 @@ export default function App() {
     e.preventDefault()
     if (!newMessage.trim() || !selectedGdm) return
     try {
-      const res = await fetch('http://localhost:5000/v1/messages', {
+      const res = await fetch(API_URL + '/v1/messages', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -838,7 +840,7 @@ export default function App() {
   async function handleCreateConsignor(e) {
     e.preventDefault()
     try {
-      const res = await fetch('http://localhost:5000/v1/master/consignors', {
+      const res = await fetch(API_URL + '/v1/master/consignors', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
         body: JSON.stringify(consignorForm)
@@ -853,7 +855,7 @@ export default function App() {
   async function handleCreateConsignee(e) {
     e.preventDefault()
     try {
-      const res = await fetch('http://localhost:5000/v1/master/consignees', {
+      const res = await fetch(API_URL + '/v1/master/consignees', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
         body: JSON.stringify(consigneeForm)
@@ -868,7 +870,7 @@ export default function App() {
   async function handleCreateLorry(e) {
     e.preventDefault()
     try {
-      const res = await fetch('http://localhost:5000/v1/master/lorries', {
+      const res = await fetch(API_URL + '/v1/master/lorries', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
         body: JSON.stringify(lorryForm)
