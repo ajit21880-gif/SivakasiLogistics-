@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-const API_URL = import.meta.env.VITE_API_URL || API_URL + '';
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 
 
 export default function App() {
@@ -76,6 +76,8 @@ export default function App() {
   // Detailed GDM / print overlays
   const [selectedGdm, setSelectedGdm] = useState(null)
   const [selectedGc, setSelectedGc] = useState(null)
+  const [showPostSavePrintModal, setShowPostSavePrintModal] = useState(false)
+  const [savedGcRecord, setSavedGcRecord] = useState(null)
   const [gcDispatches, setGcDispatches] = useState([]) // Dispatches for selected GC (Requirement 4)
   const [chatMessages, setChatMessages] = useState([])
   const [newMessage, setNewMessage] = useState('')
@@ -145,7 +147,10 @@ export default function App() {
         fetchAdminApprovals()
       }
 
-      // First time password change enforcement
+      if (activeTab === 'dataEntry' && !gcForm.id) {
+        fetchNextGcNumber()
+      }
+
       if (user?.isDefaultPassword) {
         setShowPasswordChangeModal(true)
       }
@@ -200,6 +205,20 @@ export default function App() {
         headers: { Authorization: 'Bearer ' + token }
       })
       if (res.ok) setConsignments((await res.json()).data || [])
+    } catch (err) {
+      console.error(err)
+    }
+  }
+
+  async function fetchNextGcNumber() {
+    try {
+      const res = await fetch(API_URL + '/v1/gc/next-number', {
+        headers: { Authorization: 'Bearer ' + token }
+      })
+      if (res.ok) {
+        const body = await res.json()
+        setGcForm(prev => ({ ...prev, gcNumber: body.gcNumber }))
+      }
     } catch (err) {
       console.error(err)
     }
@@ -463,18 +482,16 @@ export default function App() {
       const body = await res.json()
       if (!res.ok) throw new Error(body.message || 'Operation failed')
 
-      alert(body.message)
       fetchConsignments()
 
       if (andPrint) {
-        // Open Print layout directly
-        setSelectedGc(body.data)
-        setTimeout(() => window.print(), 500)
+        setSavedGcRecord(body.data)
+        setShowPostSavePrintModal(true)
       } else {
+        alert(body.message)
         setActiveTab('gcEnquiry')
+        handleClearGcForm()
       }
-
-      handleClearGcForm()
     } catch (err) {
       alert(err.message)
     }
@@ -506,6 +523,9 @@ export default function App() {
       printType: 'LORRY COPY',
       serviceTaxPayableBy: 'Consignee'
     })
+    setTimeout(() => {
+      fetchNextGcNumber()
+    }, 50)
   }
 
   // --- GDM (MULTIPLE LOAD) CREATION (Requirement 4) ---
@@ -890,6 +910,152 @@ export default function App() {
   const currentServiceTax = currentFreight * (gcForm.serviceTaxPercent / 100)
   // Freight = Total Cargo Value + ST + Hamali + StCharges + Others (as requested by user)
   const currentTotal = parseFloat(gcForm.value || 0) + currentFreight + currentServiceTax + parseFloat(gcForm.hamali || 0) + parseFloat(gcForm.stCharges || 0) + parseFloat(gcForm.others || 0)
+
+  // --- RENDER DUAL COPY LR RECEIPTS (Screenshot 1 physical format) ---
+  const renderSingleReceiptBox = (gc, copyLabel) => {
+    const freightVal = gc.freight || 0;
+    const hamaliVal = gc.hamali || 0;
+    const stChargesVal = gc.stCharges || 0;
+    const othersVal = gc.others || 0;
+    const chargesTotal = freightVal + hamaliVal + stChargesVal + othersVal;
+    
+    const gstPercentText = `GST @ ${gc.serviceTaxPercent}%:`;
+    const gstValText = (gc.serviceTax || 0).toFixed(2);
+    
+    let stPaidByText = '';
+    if (gc.serviceTaxPayableBy === 'Consignee') {
+      stPaidByText = gc.consignee?.name || 'CONSIGNEE';
+    } else if (gc.serviceTaxPayableBy === 'Consignor') {
+      stPaidByText = gc.consignor?.name || 'CONSIGNOR';
+    } else {
+      stPaidByText = 'Transporter';
+    }
+
+    const formattedGcDate = gc.date ? new Date(gc.date).toLocaleDateString('en-GB') : '';
+    const formattedInvDate = gc.invoiceDate ? new Date(gc.invoiceDate).toLocaleDateString('en-GB') : '';
+    const invDetailsText = gc.invoiceNo ? `${gc.invoiceNo} / ${formattedInvDate}` : '';
+
+    return (
+      <div className="drl-receipt-box" key={copyLabel}>
+        {/* Header section */}
+        <div className="drl-receipt-header">
+          <div className="drl-receipt-logo-block">
+            <div className="drl-logo-tilted">
+              <div>DRL</div>
+            </div>
+            <div className="drl-company-info">
+              <h2 className="drl-company-title">DEV ROAD LINES</h2>
+              <p style={{ margin: 0 }}>410-JAWAHARLAL NEHRU ROAD</p>
+              <p style={{ margin: 0 }}>SIVAKASI-626123</p>
+              <p style={{ margin: 0, fontWeight: 'bold' }}>GSTIN: 33AAQFD6720J1ZA</p>
+            </div>
+          </div>
+          <div className="drl-risk-tag">
+            (At Owners Risk Only)
+          </div>
+          <div className="drl-receipt-no-block">
+            <span className="drl-copy-label">{copyLabel}</span>
+            <p style={{ margin: '2px 0' }}><strong>CN No.</strong> &nbsp;&nbsp;&nbsp;{gc.gcNumber}</p>
+            <p style={{ margin: '2px 0' }}><strong>Date</strong> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;{formattedGcDate}</p>
+            <p style={{ margin: '2px 0' }}><strong>Inv.No</strong> &nbsp;&nbsp;&nbsp;{invDetailsText}</p>
+            <p style={{ margin: '2px 0' }}><strong>Inv.Val Rs.</strong> {gc.value?.toFixed(2)}</p>
+          </div>
+        </div>
+
+        {/* Details (Consignor/Consignee/Origin/Destination) */}
+        <div className="drl-receipt-details">
+          <div className="drl-details-left">
+            <p><strong>Delivery</strong> &nbsp;&nbsp;&nbsp;&nbsp;{gc.delivery || gc.toCity}</p>
+            <p><strong>Marks</strong> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;{gc.mark || 'N/A'}</p>
+            <p><strong>CONSIGNOR</strong> &nbsp;&nbsp;&nbsp;{gc.consignor?.name}</p>
+            <p><strong>ORIGIN</strong> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;{gc.fromCity}</p>
+            <p><strong>GSTIN</strong> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;{gc.consignor?.gstn || 'N/A'}</p>
+            <p style={{ marginTop: 8 }}><strong>CONSIGNEE</strong> &nbsp;&nbsp;{gc.consignee?.name}</p>
+            <p><strong>DESTINATION</strong> {gc.toCity}</p>
+            <p><strong>GSTIN</strong> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;{gc.consignee?.gstn || 'N/A'}</p>
+          </div>
+          <div className="drl-details-right">
+            <p style={{ marginTop: 20 }}><strong>From</strong> &nbsp;&nbsp;{gc.fromCity}</p>
+            <p style={{ marginTop: 35 }}><strong>To</strong> &nbsp;&nbsp;&nbsp;&nbsp;{gc.toCity}</p>
+          </div>
+        </div>
+
+        {/* Goods & Billing Grid Table */}
+        <table className="drl-receipt-table">
+          <thead>
+            <tr>
+              <th style={{ width: '12%' }}>PACKAGES</th>
+              <th style={{ width: '38%' }}>GOODS DETAILS</th>
+              <th style={{ width: '12%' }}>WEIGHT</th>
+              <th style={{ width: '12%' }}>RATE</th>
+              <th style={{ width: '16%' }}>FREIGHT DETAILS</th>
+              <th style={{ width: '10%', textAlign: 'right' }}>AMOUNT</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>{gc.quantity}</td>
+              <td>{gc.saidToContainDesc || 'FIREWORKS'}</td>
+              <td>{gc.charWt ? `${gc.charWt}` : 'FIXED'}</td>
+              <td>{gc.rateKg ? `${gc.rateKg}` : 'FIXED'}</td>
+              <td>FREIGHT</td>
+              <td style={{ textAlign: 'right' }}>{freightVal.toFixed(2)}</td>
+            </tr>
+            <tr>
+              <td></td>
+              <td colSpan="3" rowSpan="5" style={{ position: 'relative' }}>
+                {/* Payment status stamp block in middle of empty rows */}
+                <div className="drl-middle-payment-box">
+                  <div className="drl-pay-status-label">{gc.paymentStatus || 'TO PAY'}</div>
+                  <div className="drl-pay-amount-val">Rs. {chargesTotal.toFixed(2)}</div>
+                </div>
+              </td>
+              <td>HAMALI</td>
+              <td style={{ textAlign: 'right' }}>{hamaliVal.toFixed(2)}</td>
+            </tr>
+            <tr>
+              <td></td>
+              <td>ST. CHARGES</td>
+              <td style={{ textAlign: 'right' }}>{stChargesVal.toFixed(2)}</td>
+            </tr>
+            <tr>
+              <td></td>
+              <td>OTHERS</td>
+              <td style={{ textAlign: 'right' }}>{othersVal.toFixed(2)}</td>
+            </tr>
+            <tr>
+              <td></td>
+              <td>{gstPercentText}</td>
+              <td style={{ textAlign: 'right' }}>{gstValText}</td>
+            </tr>
+            <tr>
+              <td></td>
+              <td style={{ borderTop: '1px dashed #000', fontWeight: 'bold' }}>TOTAL</td>
+              <td style={{ borderTop: '1px dashed #000', textAlign: 'right', fontWeight: 'bold' }}>{chargesTotal.toFixed(2)}</td>
+            </tr>
+          </tbody>
+        </table>
+
+        {/* Footer disclaimer and Signatory block */}
+        <div className="drl-receipt-footer">
+          <div style={{ fontWeight: 'bold', textTransform: 'uppercase' }}>
+            SERVICE TAX TO BE PAID BY : {stPaidByText} under Reverse Mechanism
+          </div>
+          <div className="drl-footer-row">
+            <div style={{ fontStyle: 'italic', fontWeight: 'bold' }}>
+              SUBJECT TO SIVAKASI jurisdiction Only
+            </div>
+            <div style={{ textAlign: 'right', minWidth: 200 }}>
+              <div style={{ fontWeight: 'bold', marginBottom: 25 }}>for DEV ROAD LINES</div>
+              <div style={{ borderTop: '1px solid #000', display: 'inline-block', width: '150px', textAlign: 'center', paddingTop: 3, fontSize: 10 }}>
+                (Authorised Signatory)
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
 
   // GDM Loading totals
   const currentGdmTotalQty = gdmForm.items.reduce((sum, item) => sum + (item.qty || 0), 0)
@@ -1458,34 +1624,35 @@ export default function App() {
             </div>
 
             <form onSubmit={(e) => handleCreateGc(e, false)}>
-              <div className="grid-2" style={{ gap: 16, marginBottom: 0 }}>
-                {/* Left Column */}
-                <div>
-                  <div className="grid-2" style={{ gap: 8, marginBottom: 12 }}>
-                    <div className="form-group" style={{ marginBottom: 0 }}>
-                      <label style={{ color: '#000' }}>Enter Date</label>
-                      <input 
-                        type="date" 
-                        className="form-control" 
-                        style={{ background: '#fff', color: '#000', borderColor: '#b55a00' }}
-                        value={gcForm.date} 
-                        onChange={(e) => setGcForm({ ...gcForm, date: e.target.value })} 
-                        required 
-                      />
-                    </div>
-                    <div className="form-group" style={{ marginBottom: 0 }}>
-                      <label style={{ color: '#000' }}>GC No</label>
-                      <input 
-                        type="text" 
-                        className="form-control" 
-                        style={{ background: '#eaeaea', color: '#000', fontWeight: 'bold', borderColor: '#b55a00' }}
-                        value={gcForm.gcNumber || 'AUTO-GENERATED'} 
-                        disabled 
-                      />
-                    </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+                {/* Row 1: GC No & Enter Date */}
+                <div className="grid-2" style={{ gap: 8, marginBottom: 12 }}>
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label style={{ color: '#000' }}>GC No</label>
+                    <input 
+                      type="text" 
+                      className="form-control" 
+                      style={{ background: '#eaeaea', color: '#000', fontWeight: 'bold', borderColor: '#b55a00' }}
+                      value={gcForm.gcNumber || 'AUTO-GENERATED'} 
+                      disabled 
+                    />
                   </div>
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label style={{ color: '#000' }}>Enter Date</label>
+                    <input 
+                      type="date" 
+                      className="form-control" 
+                      style={{ background: '#fff', color: '#000', borderColor: '#b55a00' }}
+                      value={gcForm.date} 
+                      onChange={(e) => setGcForm({ ...gcForm, date: e.target.value })} 
+                      required 
+                    />
+                  </div>
+                </div>
 
-                  <div className="form-group">
+                {/* Row 2: Consignor & Origin */}
+                <div className="grid-2" style={{ gap: 8, marginBottom: 12 }}>
+                  <div className="form-group" style={{ marginBottom: 0 }}>
                     <label style={{ color: '#000' }}>Consignor (Seller)</label>
                     <select 
                       className="form-control" 
@@ -1501,9 +1668,8 @@ export default function App() {
                       {consignors.map(c => <option key={c.id} value={c.id} style={{ color: '#000' }}>{c.name}</option>)}
                     </select>
                   </div>
-
-                  <div className="form-group">
-                    <label style={{ color: '#000' }}>From City</label>
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label style={{ color: '#000' }}>Origin</label>
                     <input 
                       type="text" 
                       className="form-control" 
@@ -1512,153 +1678,11 @@ export default function App() {
                       onChange={(e) => setGcForm({ ...gcForm, fromCity: e.target.value })} 
                     />
                   </div>
-
-                  <div className="grid-2" style={{ gap: 8, marginBottom: 12 }}>
-                    <div className="form-group" style={{ marginBottom: 0 }}>
-                      <label style={{ color: '#000' }}>Invoice No</label>
-                      <input 
-                        type="text" 
-                        className="form-control" 
-                        style={{ background: '#fff', color: '#000', borderColor: '#b55a00' }}
-                        value={gcForm.invoiceNo} 
-                        onChange={(e) => setGcForm({ ...gcForm, invoiceNo: e.target.value })} 
-                        required 
-                      />
-                    </div>
-                    <div className="form-group" style={{ marginBottom: 0 }}>
-                      <label style={{ color: '#000' }}>Invoice Date</label>
-                      <input 
-                        type="date" 
-                        className="form-control" 
-                        style={{ background: '#fff', color: '#000', borderColor: '#b55a00' }}
-                        value={gcForm.invoiceDate} 
-                        onChange={(e) => setGcForm({ ...gcForm, invoiceDate: e.target.value })} 
-                      />
-                    </div>
-                  </div>
-
-                  <div className="grid-2" style={{ gap: 8, marginBottom: 12 }}>
-                    <div className="form-group" style={{ marginBottom: 0 }}>
-                      <label style={{ color: '#000' }}>Mark</label>
-                      <input 
-                        type="text" 
-                        className="form-control" 
-                        style={{ background: '#fff', color: '#000', borderColor: '#b55a00' }}
-                        value={gcForm.mark} 
-                        onChange={(e) => setGcForm({ ...gcForm, mark: e.target.value })} 
-                      />
-                    </div>
-                    <div className="form-group" style={{ marginBottom: 0 }}>
-                      <label style={{ color: '#000' }}>Godown</label>
-                      <input 
-                        type="text" 
-                        className="form-control" 
-                        style={{ background: '#fff', color: '#000', borderColor: '#b55a00' }}
-                        value={gcForm.godown} 
-                        onChange={(e) => setGcForm({ ...gcForm, godown: e.target.value })} 
-                      />
-                    </div>
-                  </div>
-
-                  <div className="grid-3" style={{ gap: 8, marginBottom: 12 }}>
-                    <div className="form-group" style={{ marginBottom: 0 }}>
-                      <label style={{ color: '#000' }}>Hamali (₹)</label>
-                      <input 
-                        type="number" 
-                        className="form-control" 
-                        style={{ background: '#fff', color: '#000', borderColor: '#b55a00' }}
-                        value={gcForm.hamali} 
-                        onChange={(e) => setGcForm({ ...gcForm, hamali: e.target.value })} 
-                      />
-                    </div>
-                    <div className="form-group" style={{ marginBottom: 0 }}>
-                      <label style={{ color: '#000' }}>St. Charges (₹)</label>
-                      <input 
-                        type="number" 
-                        className="form-control" 
-                        style={{ background: '#fff', color: '#000', borderColor: '#b55a00' }}
-                        value={gcForm.stCharges} 
-                        onChange={(e) => setGcForm({ ...gcForm, stCharges: e.target.value })} 
-                      />
-                    </div>
-                    <div className="form-group" style={{ marginBottom: 0 }}>
-                      <label style={{ color: '#000' }}>Others (₹)</label>
-                      <input 
-                        type="number" 
-                        className="form-control" 
-                        style={{ background: '#fff', color: '#000', borderColor: '#b55a00' }}
-                        value={gcForm.others} 
-                        onChange={(e) => setGcForm({ ...gcForm, others: e.target.value })} 
-                      />
-                    </div>
-                  </div>
-
-                  <div className="grid-3" style={{ gap: 8, marginBottom: 12 }}>
-                    <div className="form-group" style={{ marginBottom: 0 }}>
-                      <label style={{ color: '#000' }}>Char: Wt (kg)</label>
-                      <input 
-                        type="number" 
-                        className="form-control" 
-                        style={{ background: '#fff', color: '#000', borderColor: '#b55a00' }}
-                        value={gcForm.charWt} 
-                        onChange={(e) => setGcForm({ ...gcForm, charWt: e.target.value })} 
-                        required 
-                      />
-                    </div>
-                    <div className="form-group" style={{ marginBottom: 0 }}>
-                      <label style={{ color: '#000' }}>Rate/Kg (₹)</label>
-                      <input 
-                        type="number" 
-                        className="form-control" 
-                        style={{ background: '#fff', color: '#000', borderColor: '#b55a00' }}
-                        value={gcForm.rateKg} 
-                        onChange={(e) => setGcForm({ ...gcForm, rateKg: e.target.value })} 
-                        required 
-                      />
-                    </div>
-                    <div className="form-group" style={{ marginBottom: 0 }}>
-                      <label style={{ color: '#000' }}>Freight (₹)</label>
-                      <input 
-                        type="text" 
-                        className="form-control" 
-                        style={{ background: '#eaeaea', color: '#000', fontWeight: 'bold', borderColor: '#b55a00' }}
-                        value={currentFreight} 
-                        disabled 
-                      />
-                    </div>
-                  </div>
-
-                  <div className="grid-2" style={{ gap: 8, marginBottom: 12 }}>
-                    <div className="form-group" style={{ marginBottom: 0 }}>
-                      <label style={{ color: '#000' }}>Payment Status</label>
-                      <select 
-                        className="form-control" 
-                        style={{ background: '#fff', color: '#000', borderColor: '#b55a00' }}
-                        value={gcForm.paymentStatus}
-                        onChange={(e) => setGcForm({ ...gcForm, paymentStatus: e.target.value })}
-                      >
-                        <option value="To/Pay">To/Pay</option>
-                        <option value="Paid">Paid</option>
-                        <option value="TBB">TBB (To Be Billed)</option>
-                      </select>
-                    </div>
-                    <div className="form-group" style={{ marginBottom: 0 }}>
-                      <label style={{ color: '#000' }}>Box Quantity</label>
-                      <input 
-                        type="number" 
-                        className="form-control" 
-                        style={{ background: '#fff', color: '#000', borderColor: '#b55a00' }}
-                        value={gcForm.quantity} 
-                        onChange={(e) => setGcForm({ ...gcForm, quantity: e.target.value })} 
-                        required 
-                      />
-                    </div>
-                  </div>
                 </div>
 
-                {/* Right Column */}
-                <div>
-                  <div className="form-group">
+                {/* Row 3: Consignee & Destination */}
+                <div className="grid-2" style={{ gap: 8, marginBottom: 12 }}>
+                  <div className="form-group" style={{ marginBottom: 0 }}>
                     <label style={{ color: '#000' }}>Consignee (Buyer)</label>
                     <select 
                       className="form-control" 
@@ -1674,9 +1698,8 @@ export default function App() {
                       {consignees.map(c => <option key={c.id} value={c.id} style={{ color: '#000' }}>{c.name}</option>)}
                     </select>
                   </div>
-
-                  <div className="form-group">
-                    <label style={{ color: '#000' }}>To City</label>
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label style={{ color: '#000' }}>Destination</label>
                     <input 
                       type="text" 
                       className="form-control" 
@@ -1685,55 +1708,171 @@ export default function App() {
                       onChange={(e) => setGcForm({ ...gcForm, toCity: e.target.value })} 
                     />
                   </div>
+                </div>
 
-                  <div className="grid-2" style={{ gap: 8, marginBottom: 12 }}>
-                    <div className="form-group" style={{ marginBottom: 0 }}>
-                      <label style={{ color: '#000' }}>Cargo Value (₹)</label>
-                      <input 
-                        type="number" 
-                        className="form-control" 
-                        style={{ background: '#fff', color: '#000', borderColor: '#b55a00' }}
-                        value={gcForm.value} 
-                        onChange={(e) => setGcForm({ ...gcForm, value: e.target.value })} 
-                        required 
-                      />
-                    </div>
-                    <div className="form-group" style={{ marginBottom: 0 }}>
-                      <label style={{ color: '#000' }}>Delivery Method</label>
-                      <input 
-                        type="text" 
-                        className="form-control" 
-                        style={{ background: '#fff', color: '#000', borderColor: '#b55a00' }}
-                        value={gcForm.delivery} 
-                        onChange={(e) => setGcForm({ ...gcForm, delivery: e.target.value })} 
-                      />
-                    </div>
+                {/* Row 4: Invoice No, Invoice Date, Invoice value */}
+                <div className="grid-3" style={{ gap: 8, marginBottom: 12 }}>
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label style={{ color: '#000' }}>Invoice No</label>
+                    <input 
+                      type="text" 
+                      className="form-control" 
+                      style={{ background: '#fff', color: '#000', borderColor: '#b55a00' }}
+                      value={gcForm.invoiceNo} 
+                      onChange={(e) => setGcForm({ ...gcForm, invoiceNo: e.target.value })} 
+                      required 
+                    />
                   </div>
-
-                  <div className="grid-2" style={{ gap: 8, marginBottom: 12 }}>
-                    <div className="form-group" style={{ marginBottom: 0 }}>
-                      <label style={{ color: '#000' }}>Service Tax %</label>
-                      <input 
-                        type="number" 
-                        className="form-control" 
-                        style={{ background: '#fff', color: '#000', borderColor: '#b55a00' }}
-                        value={gcForm.serviceTaxPercent} 
-                        onChange={(e) => setGcForm({ ...gcForm, serviceTaxPercent: e.target.value })} 
-                      />
-                    </div>
-                    <div className="form-group" style={{ marginBottom: 0 }}>
-                      <label style={{ color: '#000' }}>Service Tax (₹)</label>
-                      <input 
-                        type="text" 
-                        className="form-control" 
-                        style={{ background: '#eaeaea', color: '#000', fontWeight: 'bold', borderColor: '#b55a00' }}
-                        value={currentServiceTax.toFixed(2)} 
-                        disabled 
-                      />
-                    </div>
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label style={{ color: '#000' }}>Invoice Date</label>
+                    <input 
+                      type="date" 
+                      className="form-control" 
+                      style={{ background: '#fff', color: '#000', borderColor: '#b55a00' }}
+                      value={gcForm.invoiceDate} 
+                      onChange={(e) => setGcForm({ ...gcForm, invoiceDate: e.target.value })} 
+                    />
                   </div>
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label style={{ color: '#000' }}>Invoice value</label>
+                    <input 
+                      type="number" 
+                      className="form-control" 
+                      style={{ background: '#fff', color: '#000', borderColor: '#b55a00' }}
+                      value={gcForm.value} 
+                      onChange={(e) => setGcForm({ ...gcForm, value: e.target.value })} 
+                      required 
+                    />
+                  </div>
+                </div>
 
-                  <div className="form-group">
+                {/* Row 5: Mark, Godown, Delivery Method */}
+                <div className="grid-3" style={{ gap: 8, marginBottom: 12 }}>
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label style={{ color: '#000' }}>Mark</label>
+                    <input 
+                      type="text" 
+                      className="form-control" 
+                      style={{ background: '#fff', color: '#000', borderColor: '#b55a00' }}
+                      value={gcForm.mark} 
+                      onChange={(e) => setGcForm({ ...gcForm, mark: e.target.value })} 
+                    />
+                  </div>
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label style={{ color: '#000' }}>Godown</label>
+                    <input 
+                      type="text" 
+                      className="form-control" 
+                      style={{ background: '#fff', color: '#000', borderColor: '#b55a00' }}
+                      value={gcForm.godown} 
+                      onChange={(e) => setGcForm({ ...gcForm, godown: e.target.value })} 
+                    />
+                  </div>
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label style={{ color: '#000' }}>Delivery Method</label>
+                    <input 
+                      type="text" 
+                      className="form-control" 
+                      style={{ background: '#fff', color: '#000', borderColor: '#b55a00' }}
+                      value={gcForm.delivery} 
+                      onChange={(e) => setGcForm({ ...gcForm, delivery: e.target.value })} 
+                    />
+                  </div>
+                </div>
+
+                {/* Row 6: Hamali, St. Charges, Others */}
+                <div className="grid-3" style={{ gap: 8, marginBottom: 12 }}>
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label style={{ color: '#000' }}>Hamali (₹)</label>
+                    <input 
+                      type="number" 
+                      className="form-control" 
+                      style={{ background: '#fff', color: '#000', borderColor: '#b55a00' }}
+                      value={gcForm.hamali} 
+                      onChange={(e) => setGcForm({ ...gcForm, hamali: e.target.value })} 
+                    />
+                  </div>
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label style={{ color: '#000' }}>St. Charges (₹)</label>
+                    <input 
+                      type="number" 
+                      className="form-control" 
+                      style={{ background: '#fff', color: '#000', borderColor: '#b55a00' }}
+                      value={gcForm.stCharges} 
+                      onChange={(e) => setGcForm({ ...gcForm, stCharges: e.target.value })} 
+                    />
+                  </div>
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label style={{ color: '#000' }}>Others (₹)</label>
+                    <input 
+                      type="number" 
+                      className="form-control" 
+                      style={{ background: '#fff', color: '#000', borderColor: '#b55a00' }}
+                      value={gcForm.others} 
+                      onChange={(e) => setGcForm({ ...gcForm, others: e.target.value })} 
+                    />
+                  </div>
+                </div>
+
+                {/* Row 7: Char: Wt, Rate/Kg, Service Tax % */}
+                <div className="grid-3" style={{ gap: 8, marginBottom: 12 }}>
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label style={{ color: '#000' }}>Char: Wt (kg)</label>
+                    <input 
+                      type="number" 
+                      className="form-control" 
+                      style={{ background: '#fff', color: '#000', borderColor: '#b55a00' }}
+                      value={gcForm.charWt} 
+                      onChange={(e) => setGcForm({ ...gcForm, charWt: e.target.value })} 
+                      required 
+                    />
+                  </div>
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label style={{ color: '#000' }}>Rate/Kg (₹)</label>
+                    <input 
+                      type="number" 
+                      className="form-control" 
+                      style={{ background: '#fff', color: '#000', borderColor: '#b55a00' }}
+                      value={gcForm.rateKg} 
+                      onChange={(e) => setGcForm({ ...gcForm, rateKg: e.target.value })} 
+                      required 
+                    />
+                  </div>
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label style={{ color: '#000' }}>Service Tax %</label>
+                    <input 
+                      type="number" 
+                      className="form-control" 
+                      style={{ background: '#fff', color: '#000', borderColor: '#b55a00' }}
+                      value={gcForm.serviceTaxPercent} 
+                      onChange={(e) => setGcForm({ ...gcForm, serviceTaxPercent: e.target.value })} 
+                    />
+                  </div>
+                </div>
+
+                {/* Row 8: Freight, Service Tax, Total Billing Amount */}
+                <div className="grid-3" style={{ gap: 8, marginBottom: 12 }}>
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label style={{ color: '#000' }}>Freight (₹)</label>
+                    <input 
+                      type="text" 
+                      className="form-control" 
+                      style={{ background: '#eaeaea', color: '#000', fontWeight: 'bold', borderColor: '#b55a00' }}
+                      value={currentFreight} 
+                      disabled 
+                    />
+                  </div>
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label style={{ color: '#000' }}>Service Tax (₹)</label>
+                    <input 
+                      type="text" 
+                      className="form-control" 
+                      style={{ background: '#eaeaea', color: '#000', fontWeight: 'bold', borderColor: '#b55a00' }}
+                      value={currentServiceTax.toFixed(2)} 
+                      disabled 
+                    />
+                  </div>
+                  <div className="form-group" style={{ marginBottom: 0 }}>
                     <label style={{ color: '#000' }}>Total Billing Amount (₹)</label>
                     <input 
                       type="text" 
@@ -1742,84 +1881,112 @@ export default function App() {
                       value={`₹${currentTotal.toFixed(2)}`} 
                       disabled 
                     />
-                    <small style={{ color: '#5f2c00', display: 'block', marginTop: 4 }}>
-                      Calculation: Value + Freight + ST + Hamali + Stationary + Others
-                    </small>
                   </div>
+                </div>
 
-                  <div className="form-group">
+                {/* Row 9: Box Quantity, Payment Status, Said To Contain */}
+                <div className="grid-3" style={{ gap: 8, marginBottom: 12 }}>
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label style={{ color: '#000' }}>Box Quantity</label>
+                    <input 
+                      type="number" 
+                      className="form-control" 
+                      style={{ background: '#fff', color: '#000', borderColor: '#b55a00' }}
+                      value={gcForm.quantity} 
+                      onChange={(e) => setGcForm({ ...gcForm, quantity: e.target.value })} 
+                      required 
+                    />
+                  </div>
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label style={{ color: '#000' }}>Payment Status</label>
+                    <select 
+                      className="form-control" 
+                      style={{ background: '#fff', color: '#000', borderColor: '#b55a00' }}
+                      value={gcForm.paymentStatus}
+                      onChange={(e) => setGcForm({ ...gcForm, paymentStatus: e.target.value })}
+                    >
+                      <option value="To/Pay">To/Pay</option>
+                      <option value="Paid">Paid</option>
+                      <option value="TBB">TBB (To Be Billed)</option>
+                    </select>
+                  </div>
+                  <div className="form-group" style={{ marginBottom: 0 }}>
                     <label style={{ color: '#000', fontWeight: 'bold' }}>Said To Contain</label>
-                    <select 
-                      className="form-control" 
-                      style={{ background: '#fff', color: '#000', borderColor: '#b55a00', marginBottom: 8 }}
-                      value={gcForm.saidToContainCode}
-                      onChange={(e) => setGcForm({ ...gcForm, saidToContainCode: e.target.value })}
-                    >
-                      <option value="">-- Select Code --</option>
-                      <option value="1">1 = FWs (Fireworks)</option>
-                      <option value="2">2 = Caps</option>
-                      <option value="3">3 = PGoods (Paper Goods)</option>
-                      <option value="4">4 = Smatches (Safety Matches)</option>
-                      <option value="5">5 = Others</option>
-                    </select>
-                    <input 
-                      type="text" 
-                      className="form-control" 
-                      placeholder="Autopopulated Description" 
-                      style={{ background: '#eaeaea', color: '#000', borderColor: '#b55a00' }}
-                      value={
-                        gcForm.saidToContainCode === '1' ? 'FIREWORKS' :
-                        gcForm.saidToContainCode === '2' ? 'CAPS' :
-                        gcForm.saidToContainCode === '3' ? 'PRINTED GOODS' :
-                        gcForm.saidToContainCode === '4' ? 'SAFETY MATCHES' :
-                        gcForm.saidToContainCode === '5' ? 'OTHERS' : ''
-                      }
-                      disabled
-                    />
-                  </div>
-
-                  <div className="form-group">
-                    <label style={{ color: '#000' }}>Remarks</label>
-                    <input 
-                      type="text" 
-                      className="form-control" 
-                      style={{ background: '#fff', color: '#000', borderColor: '#b55a00' }}
-                      value={gcForm.remarks} 
-                      onChange={(e) => setGcForm({ ...gcForm, remarks: e.target.value })} 
-                    />
-                  </div>
-
-                  <div className="form-group">
-                    <label style={{ color: '#000' }}>Print Type</label>
-                    <select 
-                      className="form-control" 
-                      style={{ background: '#fff', color: '#000', borderColor: '#b55a00' }}
-                      value={gcForm.printType}
-                      onChange={(e) => setGcForm({ ...gcForm, printType: e.target.value })}
-                    >
-                      <option value="LORRY COPY">LORRY COPY</option>
-                      <option value="CONSIGNOR COPY">CONSIGNOR COPY</option>
-                      <option value="CONSIGNEE COPY">CONSIGNEE COPY</option>
-                      <option value="OFFICE COPY">OFFICE COPY</option>
-                    </select>
-                  </div>
-
-                  <div className="form-group" style={{ marginBottom: 12 }}>
-                    <label style={{ color: '#000', display: 'block', marginBottom: 6 }}>Service Tax Payable By</label>
-                    <div style={{ display: 'flex', gap: 16 }}>
-                      {['Consignee', 'Consignor', 'Transporter'].map((item) => (
-                        <label key={item} style={{ color: '#000', display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 14 }}>
-                          <input 
-                            type="radio" 
-                            name="stPayable" 
-                            value={item} 
-                            checked={gcForm.serviceTaxPayableBy === item}
-                            onChange={(e) => setGcForm({ ...gcForm, serviceTaxPayableBy: e.target.value })}
-                          /> {item}
-                        </label>
-                      ))}
+                    <div style={{ display: 'flex', gap: 4 }}>
+                      <select 
+                        className="form-control" 
+                        style={{ background: '#fff', color: '#000', borderColor: '#b55a00', flex: '1 1 40%' }}
+                        value={gcForm.saidToContainCode}
+                        onChange={(e) => setGcForm({ ...gcForm, saidToContainCode: e.target.value })}
+                      >
+                        <option value="">-- Code --</option>
+                        <option value="1">1 = FWs (Fireworks)</option>
+                        <option value="2">2 = Caps</option>
+                        <option value="3">3 = PGoods (Paper Goods)</option>
+                        <option value="4">4 = Smatches (Safety Matches)</option>
+                        <option value="5">5 = Others</option>
+                      </select>
+                      <input 
+                        type="text" 
+                        className="form-control" 
+                        style={{ background: '#eaeaea', color: '#000', borderColor: '#b55a00', flex: '1 1 60%' }}
+                        value={
+                          gcForm.saidToContainCode === '1' ? 'FIREWORKS' :
+                          gcForm.saidToContainCode === '2' ? 'CAPS' :
+                          gcForm.saidToContainCode === '3' ? 'PRINTED GOODS' :
+                          gcForm.saidToContainCode === '4' ? 'SAFETY MATCHES' :
+                          gcForm.saidToContainCode === '5' ? 'OTHERS' : ''
+                        }
+                        disabled
+                      />
                     </div>
                   </div>
+                </div>
+
+                {/* Row 10: Service Tax Payable By */}
+                <div className="form-group" style={{ marginBottom: 12 }}>
+                  <label style={{ color: '#000', display: 'block', marginBottom: 6 }}>Service Tax Payable By</label>
+                  <div style={{ display: 'flex', gap: 16 }}>
+                    {['Consignee', 'Consignor', 'Transporter'].map((item) => (
+                      <label key={item} style={{ color: '#000', display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 14 }}>
+                        <input 
+                          type="radio" 
+                          name="stPayable" 
+                          value={item} 
+                          checked={gcForm.serviceTaxPayableBy === item}
+                          onChange={(e) => setGcForm({ ...gcForm, serviceTaxPayableBy: e.target.value })}
+                        /> {item}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Row 11: Remarks If Any */}
+                <div className="form-group" style={{ marginBottom: 12 }}>
+                  <label style={{ color: '#000' }}>Remarks If Any</label>
+                  <input 
+                    type="text" 
+                    className="form-control" 
+                    style={{ background: '#fff', color: '#000', borderColor: '#b55a00' }}
+                    value={gcForm.remarks} 
+                    onChange={(e) => setGcForm({ ...gcForm, remarks: e.target.value })} 
+                  />
+                </div>
+
+                {/* Row 12: Print Type (Existing field at the end) */}
+                <div className="form-group" style={{ marginBottom: 12 }}>
+                  <label style={{ color: '#000' }}>Print Type</label>
+                  <select 
+                    className="form-control" 
+                    style={{ background: '#fff', color: '#000', borderColor: '#b55a00' }}
+                    value={gcForm.printType}
+                    onChange={(e) => setGcForm({ ...gcForm, printType: e.target.value })}
+                  >
+                    <option value="LORRY COPY">LORRY COPY</option>
+                    <option value="CONSIGNOR COPY">CONSIGNOR COPY</option>
+                    <option value="CONSIGNEE COPY">CONSIGNEE COPY</option>
+                    <option value="OFFICE COPY">OFFICE COPY</option>
+                  </select>
                 </div>
               </div>
 
@@ -2781,6 +2948,82 @@ export default function App() {
             </div>
           </div>
         )}
+
+        {/* --- MODAL: POST-SAVE PRINT OPTIONS --- */}
+        {showPostSavePrintModal && savedGcRecord && (
+          <div className="payment-overlay no-print" style={{ zIndex: 2000 }}>
+            <div className="payment-modal" style={{ maxWidth: 480, background: '#fff', border: '3px solid #b55a00', borderRadius: 8, padding: 24, boxShadow: '0 4px 20px rgba(0,0,0,0.2)' }}>
+              <h3 style={{ color: '#b55a00', borderBottom: '2px solid #b55a00', paddingBottom: 8, marginTop: 0, fontSize: 18, fontWeight: 'bold' }}>
+                💾 Consignment Saved Successfully!
+              </h3>
+              <div style={{ margin: '16px 0', fontSize: 14, color: '#333', lineHeight: '1.6' }}>
+                <p style={{ margin: '4px 0' }}><strong>GC Number:</strong> <span style={{ fontSize: 16, color: '#b55a00', fontWeight: 'bold' }}>{savedGcRecord.gcNumber}</span></p>
+                <p style={{ margin: '4px 0' }}><strong>Consignor (Seller):</strong> {savedGcRecord.consignor?.name || 'N/A'}</p>
+                <p style={{ margin: '4px 0' }}><strong>Consignee (Buyer):</strong> {savedGcRecord.consignee?.name || 'N/A'}</p>
+                <p style={{ margin: '4px 0' }}><strong>Invoice Value:</strong> ₹{savedGcRecord.value}</p>
+                <p style={{ margin: '4px 0' }}><strong>Total Billing Amount:</strong> ₹{savedGcRecord.total?.toFixed(2)}</p>
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 20 }}>
+                <button 
+                  type="button" 
+                  onClick={() => {
+                    setSelectedGc({ ...savedGcRecord, printMode: 'STACKED' })
+                    setTimeout(() => {
+                      window.print()
+                    }, 300)
+                  }} 
+                  className="btn btn-accent" 
+                  style={{ background: '#b55a00', color: '#fff', padding: '10px 16px', fontWeight: 'bold', border: 'none', borderRadius: 4, cursor: 'pointer' }}
+                >
+                  🖨️ Print Stacked Bill (Consignor + Consignee Copy)
+                </button>
+
+                <button 
+                  type="button" 
+                  onClick={() => {
+                    setSelectedGc({ ...savedGcRecord, printMode: 'SINGLE' })
+                    setTimeout(() => {
+                      window.print()
+                    }, 300)
+                  }} 
+                  className="btn" 
+                  style={{ background: '#000', color: '#fff', padding: '10px 16px', fontWeight: 'bold', border: 'none', borderRadius: 4, cursor: 'pointer' }}
+                >
+                  🖨️ Print Single Copy ({savedGcRecord.printType || 'LORRY COPY'})
+                </button>
+
+                <div style={{ display: 'flex', gap: 10, marginTop: 10 }}>
+                  <button 
+                    type="button" 
+                    onClick={() => {
+                      setShowPostSavePrintModal(false)
+                      setSavedGcRecord(null)
+                      handleClearGcForm()
+                      setActiveTab('gcEnquiry')
+                    }} 
+                    className="btn" 
+                    style={{ flex: 1, background: '#7d3c00', color: '#fff', padding: '8px 12px', border: 'none', borderRadius: 4, cursor: 'pointer' }}
+                  >
+                    List / Enquiry
+                  </button>
+                  <button 
+                    type="button" 
+                    onClick={() => {
+                      setShowPostSavePrintModal(false)
+                      setSavedGcRecord(null)
+                      handleClearGcForm()
+                    }} 
+                    className="btn" 
+                    style={{ flex: 1, background: '#bbb', color: '#000', padding: '8px 12px', border: 'none', borderRadius: 4, cursor: 'pointer' }}
+                  >
+                    Enter New LR
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </main>
     </div>
 
@@ -2861,90 +3104,19 @@ export default function App() {
     {/* --- PRINT SHEET FOR GOODS CONSIGNMENT (GC / Lorry Receipt) --- */}
     {selectedGc && (
       <div className="printable-sheet">
-        <div style={{ border: '2px solid #000', padding: 12 }}>
-          <div style={{ textAlign: 'center', borderBottom: '2px solid #000', paddingBottom: 8 }}>
-            <h2 style={{ margin: 0, fontSize: 24 }}>DEV ROAD LINES</h2>
-            <p style={{ margin: '4px 0', fontSize: 12 }}>Sivakasi Branch, Tamil Nadu. Ph: 9443854679</p>
-            <h3 style={{ margin: '8px 0 0 0', textDecoration: 'underline' }}>GOODS CONSIGNMENT NOTE (LR)</h3>
-          </div>
-
-          <div style={{ display: 'flex', justifyContent: 'space-between', margin: '12px 0', fontSize: 13, borderBottom: '1px solid #000', paddingBottom: 8 }}>
-            <div>
-              <p><strong>LR Number:</strong> {selectedGc.gcNumber}</p>
-              <p><strong>Date:</strong> {new Date(selectedGc.date).toLocaleDateString('en-GB')}</p>
-              <p><strong>From:</strong> {selectedGc.fromCity}</p>
-              <p><strong>To:</strong> {selectedGc.toCity}</p>
+        {selectedGc.printMode === 'SINGLE' ? (
+          renderSingleReceiptBox(selectedGc, selectedGc.printType || 'LORRY COPY')
+        ) : (
+          <>
+            {renderSingleReceiptBox(selectedGc, 'CONSIGNOR COPY')}
+            <div style={{ height: '30px', borderBottom: '1px dashed #999', marginBottom: '30px', position: 'relative' }} className="no-print">
+              <span style={{ position: 'absolute', top: '18px', left: '50%', transform: 'translateX(-50%)', background: '#fff', padding: '0 10px', color: '#999', fontSize: '11px' }}>
+                ✂️ Fold / Cut here
+              </span>
             </div>
-            <div style={{ textAlign: 'right' }}>
-              <p><strong>Invoice No:</strong> {selectedGc.invoiceNo}</p>
-              <p><strong>Cargo Value:</strong> ₹{selectedGc.value}</p>
-              <p><strong>Status:</strong> {selectedGc.paymentStatus}</p>
-            </div>
-          </div>
-
-          <div style={{ display: 'flex', gap: 20, fontSize: 13, marginBottom: 12 }}>
-            <div style={{ flex: 1, border: '1px solid #000', padding: 8 }}>
-              <h4 style={{ margin: '0 0 6px 0', borderBottom: '1px solid #000' }}>Consignor Details</h4>
-              <p><strong>Name:</strong> {selectedGc.consignor?.name}</p>
-              <p><strong>GSTN:</strong> {selectedGc.consignor?.gstn}</p>
-              <p><strong>Contact:</strong> {selectedGc.consignor?.mobile}</p>
-            </div>
-            <div style={{ flex: 1, border: '1px solid #000', padding: 8 }}>
-              <h4 style={{ margin: '0 0 6px 0', borderBottom: '1px solid #000' }}>Consignee Details</h4>
-              <p><strong>Name:</strong> {selectedGc.consignee?.name}</p>
-              <p><strong>GSTN:</strong> {selectedGc.consignee?.gstn}</p>
-              <p><strong>Contact:</strong> {selectedGc.consignee?.mobile}</p>
-            </div>
-          </div>
-
-          <table style={{ margin: '12px 0' }}>
-            <thead>
-              <tr>
-                <th>Said to Contain</th>
-                <th>Weight</th>
-                <th>Rate/Kg</th>
-                <th style={{ textAlign: 'right' }}>Amount</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td>{selectedGc.quantity} PKGS OF {selectedGc.saidToContainDesc}</td>
-                <td>{selectedGc.charWt} kg</td>
-                <td>₹{selectedGc.rateKg}</td>
-                <td style={{ textAlign: 'right' }}>₹{selectedGc.freight.toFixed(2)}</td>
-              </tr>
-              <tr style={{ borderTop: '1px solid #000' }}>
-                <td colSpan="3" style={{ textAlign: 'right' }}>Hamali:</td>
-                <td style={{ textAlign: 'right' }}>₹{selectedGc.hamali.toFixed(2)}</td>
-              </tr>
-              <tr>
-                <td colSpan="3" style={{ textAlign: 'right' }}>St. Charges:</td>
-                <td style={{ textAlign: 'right' }}>₹{selectedGc.stCharges.toFixed(2)}</td>
-              </tr>
-              <tr>
-                <td colSpan="3" style={{ textAlign: 'right' }}>Others:</td>
-                <td style={{ textAlign: 'right' }}>₹{selectedGc.others.toFixed(2)}</td>
-              </tr>
-              <tr>
-                <td colSpan="3" style={{ textAlign: 'right' }}>Service Tax ({selectedGc.serviceTaxPercent}%):</td>
-                <td style={{ textAlign: 'right' }}>₹{selectedGc.serviceTax.toFixed(2)}</td>
-              </tr>
-              <tr className="total-row" style={{ fontWeight: 'bold' }}>
-                <td colSpan="3" style={{ textAlign: 'right' }}>GRAND TOTAL (Freight + Value + Charges):</td>
-                <td style={{ textAlign: 'right' }}>₹{selectedGc.total.toFixed(2)}</td>
-              </tr>
-            </tbody>
-          </table>
-
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 40, fontSize: 12 }}>
-            <div>
-              <p>Service Tax Payable by: <strong>{selectedGc.serviceTaxPayableBy}</strong></p>
-            </div>
-            <div style={{ textAlign: 'right' }}>
-              <p style={{ borderTop: '1px solid #000', width: 200, textAlign: 'center', paddingTop: 4 }}>For DEV ROAD LINES</p>
-            </div>
-          </div>
-        </div>
+            {renderSingleReceiptBox(selectedGc, 'CONSIGNEE COPY')}
+          </>
+        )}
       </div>
     )}
   </>

@@ -76,6 +76,19 @@ router.get("/", authMiddleware, async (req: AuthRequest, res: Response) => {
   }
 });
 
+// GET /v1/gc/next-number - Get the next auto-generated GC Number
+router.get("/next-number", authMiddleware, async (req: AuthRequest, res: Response) => {
+  try {
+    const count = await prisma.goodsConsignment.count();
+    const nextNum = (2249 + count).toString().padStart(5, "0");
+    const gcNumber = `D${nextNum}`;
+    res.json({ success: true, gcNumber });
+  } catch (error) {
+    console.error("Error fetching next GC number:", error);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
+});
+
 // GET /v1/gc/pending - Get pending GCs (Admin only)
 router.get("/pending", authMiddleware, async (req: AuthRequest, res: Response) => {
   try {
