@@ -110,6 +110,90 @@ router.get("/audit-report", authMiddleware, async (req: AuthRequest, res: Respon
   }
 });
 
+// GET /v1/gdm/next-number - Get the next auto-generated GDM Number
+router.get("/next-number", authMiddleware, async (req: AuthRequest, res: Response) => {
+  try {
+    const count = await prisma.goodsDispatchMemo.count();
+    const nextNum = (143 + count).toString().padStart(5, "0");
+    const gdmNumber = `D${nextNum}`;
+    res.json({ success: true, gdmNumber });
+  } catch (error) {
+    console.error("Error fetching next GDM number:", error);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
+});
+
+// GET /v1/gdm/daily-report - Get daily overview report of bookings and dispatches
+router.get("/daily-report", authMiddleware, async (req: AuthRequest, res: Response) => {
+  try {
+    const { date } = req.query; // Date formatted as YYYY-MM-DD
+    if (!date) {
+      return res.status(400).json({ success: false, message: "Date parameter is required" });
+    }
+
+    const targetDate = new Date(String(date));
+    if (isNaN(targetDate.getTime())) {
+      return res.status(400).json({ success: false, message: "Invalid date format" });
+    }
+
+    // Set start and end range for the specified day
+    const startOfDay = new Date(targetDate);
+    startOfDay.setHours(0, 0, 0, 0);
+    const endOfDay = new Date(targetDate);
+    endOfDay.setHours(23, 59, 59, 999);
+
+    // Fetch consignments booked on this date
+    const consignments = await prisma.goodsConsignment.findMany({
+      where: {
+        date: {
+          gte: startOfDay,
+          lte: endOfDay
+        }
+      },
+      include: {
+        consignor: true,
+        consignee: true
+      },
+      orderBy: { createdAt: "desc" }
+    });
+
+    // Fetch dispatches made on this date
+    const dispatches = await prisma.goodsDispatchMemo.findMany({
+      where: {
+        gdmDate: {
+          gte: startOfDay,
+          lte: endOfDay
+        }
+      },
+      include: {
+        lorry: true,
+        items: {
+          include: {
+            consignment: {
+              include: {
+                consignor: true,
+                consignee: true
+              }
+            }
+          }
+        }
+      },
+      orderBy: { createdAt: "desc" }
+    });
+
+    res.json({
+      success: true,
+      data: {
+        consignments,
+        dispatches
+      }
+    });
+  } catch (error) {
+    console.error("Daily report error:", error);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
+});
+
 // POST /v1/gdm - Create GDM (autofills Number, aggregates totals, and audits creator)
 router.post("/", authMiddleware, async (req: AuthRequest, res: Response) => {
   try {

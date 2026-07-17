@@ -16,8 +16,8 @@ export default function App() {
 
   // Login Form States
   const [roleSelection, setRoleSelection] = useState('admin') // admin, staff, customer
-  const [loginIdInput, setLoginIdInput] = useState('ADM01')
-  const [passwordInput, setPasswordInput] = useState('Demo@123456')
+  const [loginIdInput, setLoginIdInput] = useState('')
+  const [passwordInput, setPasswordInput] = useState('')
   const [authError, setAuthError] = useState('')
   const [authSuccess, setAuthSuccess] = useState('')
 
@@ -35,6 +35,13 @@ export default function App() {
 
   // Active Tab
   const [activeTab, setActiveTab] = useState('dashboard') // dashboard, dataEntry, gdmForm, masters, gcEnquiry, audits, approvals
+  const [selectedReportType, setSelectedReportType] = useState('totalBooking')
+  const [selectedReportParty, setSelectedReportParty] = useState('')
+  const [selectedReportParties, setSelectedReportParties] = useState([])
+  const [selectedReportDestination, setSelectedReportDestination] = useState('')
+  const [selectedReportDestinations, setSelectedReportDestinations] = useState([])
+  const [selectedReportGodown, setSelectedReportGodown] = useState('')
+  const [selectedPrintReport, setSelectedPrintReport] = useState(null)
 
   // Master Lists
   const [consignors, setConsignors] = useState([])
@@ -118,6 +125,7 @@ export default function App() {
 
   // --- FORM STATES: GDM FORM TAB ---
   const [gdmForm, setGdmForm] = useState({
+    gdmNumber: '',
     fromCity: 'SIVAKASI',
     toCity: '',
     lorryId: '',
@@ -125,6 +133,35 @@ export default function App() {
     items: [], // Array of { goodsConsignmentId: '', desp: 0, serviceTax: 0 }
     deliveryStatus: 'pending'
   })
+
+  const [mandatoryFields, setMandatoryFields] = useState(() => {
+    const cached = localStorage.getItem('gcMandatoryFields')
+    return cached ? JSON.parse(cached) : {
+      consignorId: true,
+      consigneeId: true,
+      fromCity: true,
+      toCity: true,
+      invoiceNo: true,
+      invoiceDate: false,
+      value: true,
+      mark: false,
+      godown: false,
+      delivery: false,
+      hamali: false,
+      stCharges: false,
+      others: false,
+      charWt: true,
+      rateKg: true,
+      quantity: true,
+      paymentStatus: true,
+      saidToContainCode: true,
+      serviceTaxPayableBy: true,
+      remarks: false
+    }
+  })
+
+  const [dailyReportDate, setDailyReportDate] = useState(() => new Date().toISOString().split('T')[0])
+  const [dailyReportData, setDailyReportData] = useState({ consignments: [], dispatches: [] })
 
   // Sync theme
   useEffect(() => {
@@ -149,6 +186,10 @@ export default function App() {
 
       if (activeTab === 'dataEntry' && !gcForm.id) {
         fetchNextGcNumber()
+      }
+
+      if (activeTab === 'gdmForm' && !gdmForm.id) {
+        fetchNextGdmNumber()
       }
 
       if (user?.isDefaultPassword) {
@@ -223,6 +264,40 @@ export default function App() {
       console.error(err)
     }
   }
+
+  async function fetchNextGdmNumber() {
+    try {
+      const res = await fetch(API_URL + '/v1/gdm/next-number', {
+        headers: { Authorization: 'Bearer ' + token }
+      })
+      if (res.ok) {
+        const body = await res.json()
+        setGdmForm(prev => ({ ...prev, gdmNumber: body.gdmNumber }))
+      }
+    } catch (err) {
+      console.error(err)
+    }
+  }
+
+  async function fetchDailyReport(selectedDate) {
+    try {
+      const res = await fetch(`${API_URL}/v1/gdm/daily-report?date=${selectedDate}`, {
+        headers: { Authorization: 'Bearer ' + token }
+      })
+      if (res.ok) {
+        const body = await res.json()
+        setDailyReportData(body.data || { consignments: [], dispatches: [] })
+      }
+    } catch (err) {
+      console.error(err)
+    }
+  }
+
+  useEffect(() => {
+    if (token && activeTab === 'dailyReport') {
+      fetchDailyReport(dailyReportDate)
+    }
+  }, [token, activeTab, dailyReportDate])
 
   async function fetchGdmList() {
     setLoading(true)
@@ -442,6 +517,41 @@ export default function App() {
       return
     }
 
+    // Check mandatory fields defined by admin
+    const displayNames = {
+      consignorId: 'Consignor (Seller)',
+      fromCity: 'Origin',
+      consigneeId: 'Consignee (Buyer)',
+      toCity: 'Destination',
+      invoiceNo: 'Invoice No',
+      invoiceDate: 'Invoice Date',
+      value: 'Invoice value',
+      mark: 'Mark',
+      godown: 'Godown',
+      delivery: 'Delivery Method',
+      hamali: 'Hamali (₹)',
+      stCharges: 'St. Charges (₹)',
+      others: 'Others (₹)',
+      charWt: 'Char: Wt (kg)',
+      rateKg: 'Rate/Kg (₹)',
+      quantity: 'Box Quantity',
+      paymentStatus: 'Payment Status',
+      saidToContainCode: 'Said To Contain',
+      serviceTaxPayableBy: 'Service Tax Payable By',
+      remarks: 'Remarks If Any'
+    }
+
+    for (const key in mandatoryFields) {
+      if (mandatoryFields[key]) {
+        const val = gcForm[key]
+        const isFalsy = val === undefined || val === null || String(val).trim() === '' || val === 0 || val === '0'
+        if (isFalsy) {
+          alert(`Validation Error: "${displayNames[key]}" is configured as a mandatory field and cannot be empty or zero!`)
+          return
+        }
+      }
+    }
+
     // Auto-calculate Said to contain description
     let saidToContainDesc = ''
     switch (gcForm.saidToContainCode) {
@@ -528,6 +638,21 @@ export default function App() {
     }, 50)
   }
 
+  function handleClearGdmForm() {
+    setGdmForm({
+      gdmNumber: '',
+      fromCity: 'SIVAKASI',
+      toCity: '',
+      lorryId: '',
+      remarks: '',
+      items: [],
+      deliveryStatus: 'pending'
+    })
+    setTimeout(() => {
+      fetchNextGdmNumber()
+    }, 50)
+  }
+
   // --- GDM (MULTIPLE LOAD) CREATION (Requirement 4) ---
   async function handleCreateGdm(e, andPrint = false) {
     if (e) e.preventDefault()
@@ -564,14 +689,7 @@ export default function App() {
       }
 
       // Reset
-      setGdmForm({
-        fromCity: 'SIVAKASI',
-        toCity: '',
-        lorryId: '',
-        remarks: '',
-        items: [],
-        deliveryStatus: 'pending'
-      })
+      handleClearGdmForm()
     } catch (err) {
       alert(err.message)
     }
@@ -906,10 +1024,12 @@ export default function App() {
   }
 
   // --- DYNAMIC RUNTIME FORM CALCULATIONS (Requirement 1) ---
-  const currentFreight = gcForm.charWt * gcForm.rateKg
-  const currentServiceTax = currentFreight * (gcForm.serviceTaxPercent / 100)
-  // Freight = Total Cargo Value + ST + Hamali + StCharges + Others (as requested by user)
-  const currentTotal = parseFloat(gcForm.value || 0) + currentFreight + currentServiceTax + parseFloat(gcForm.hamali || 0) + parseFloat(gcForm.stCharges || 0) + parseFloat(gcForm.others || 0)
+  const baseFreight = (parseFloat(gcForm.charWt) || 0) * (parseFloat(gcForm.rateKg) || 0)
+  const computedServiceTax = baseFreight * ((parseFloat(gcForm.serviceTaxPercent) || 0) / 100)
+  
+  const currentFreight = gcForm.serviceTaxPayableBy === 'Transporter' ? (baseFreight + computedServiceTax) : baseFreight
+  const currentServiceTax = computedServiceTax
+  const currentTotal = (parseFloat(gcForm.value) || 0) + currentFreight + (parseFloat(gcForm.hamali) || 0) + (parseFloat(gcForm.stCharges) || 0) + (parseFloat(gcForm.others) || 0)
 
   // --- RENDER DUAL COPY LR RECEIPTS (Screenshot 1 physical format) ---
   const renderSingleReceiptBox = (gc, copyLabel) => {
@@ -1041,7 +1161,12 @@ export default function App() {
           <div style={{ fontWeight: 'bold', textTransform: 'uppercase' }}>
             SERVICE TAX TO BE PAID BY : {stPaidByText} under Reverse Mechanism
           </div>
-          <div className="drl-footer-row">
+          {(gc.serviceTaxPayableBy === 'Consignor' || gc.serviceTaxPayableBy === 'Consignee') && (
+            <div style={{ fontWeight: 'bold', fontSize: '13px', marginTop: '6px', textTransform: 'uppercase' }} className="drl-service-tax-note">
+              Note: Service Tax payable by {gc.serviceTaxPayableBy} ({gc.serviceTaxPayableBy === 'Consignor' ? gc.consignor?.name : gc.consignee?.name})
+            </div>
+          )}
+          <div className="drl-footer-row" style={{ marginTop: gc.serviceTaxPayableBy === 'Transporter' ? '0px' : '8px' }}>
             <div style={{ fontStyle: 'italic', fontWeight: 'bold' }}>
               SUBJECT TO SIVAKASI jurisdiction Only
             </div>
@@ -1281,6 +1406,9 @@ export default function App() {
               </li>
               <li className={`nav-item ${activeTab === 'gdmForm' ? 'active' : ''}`} onClick={() => setActiveTab('gdmForm')}>
                 <span>🚚 GDM Loading Form</span>
+              </li>
+              <li className={`nav-item ${activeTab === 'dailyReport' ? 'active' : ''}`} onClick={() => setActiveTab('dailyReport')}>
+                <span>📊 Daily Overview Report</span>
               </li>
             </>
           )}
@@ -2024,7 +2152,7 @@ export default function App() {
               <div className="grid-3" style={{ gap: 12, marginBottom: 0 }}>
                 <div className="form-group">
                   <label style={{ color: '#000' }}>GDM Number (GC No)</label>
-                  <input type="text" className="form-control" style={{ background: '#eaeaea', color: '#000', borderColor: '#d35400' }} value={gdmForm.gdmNumber || 'AUTO-GENERATED'} disabled />
+                  <input type="text" className="form-control" style={{ background: '#eaeaea', color: '#000', borderColor: '#d35400' }} value={gdmForm.gdmNumber || ''} disabled />
                 </div>
                 <div className="form-group">
                   <label style={{ color: '#000' }}>GDM Date</label>
@@ -2205,7 +2333,7 @@ export default function App() {
                 <button type="submit" className="btn btn-primary" style={{ background: '#000', color: '#fff' }}>
                   Save
                 </button>
-                <button type="button" onClick={() => setGdmForm({ fromCity: 'SIVAKASI', toCity: '', lorryId: '', remarks: '', items: [], deliveryStatus: 'pending' })} className="btn btn-secondary" style={{ background: '#e67e22', color: '#fff' }}>
+                <button type="button" onClick={handleClearGdmForm} className="btn btn-secondary" style={{ background: '#e67e22', color: '#fff' }}>
                   Clear
                 </button>
                 <button type="button" onClick={() => setActiveTab('gcEnquiry')} className="btn btn-secondary" style={{ background: '#7e5109', color: '#fff' }}>
@@ -2278,7 +2406,7 @@ export default function App() {
                             <button onClick={() => { setSelectedGc(c); setTimeout(() => window.print(), 500); }} className="btn btn-accent" style={{ padding: '4px 8px', fontSize: 12 }}>
                               🖨️ Print
                             </button>
-                            {user?.role === 'admin' && (
+                            {(user?.role === 'admin' || (user?.role === 'staff' && user?.staffPermission !== 'ENTER_VIEW')) && (
                               <button 
                                 onClick={() => {
                                   setGcForm(c)
@@ -2377,6 +2505,637 @@ export default function App() {
             </div>
           </div>
         )}
+
+        {/* --- TAB: DAILY REPORT OVERVIEW --- */}
+        {activeTab === 'dailyReport' && (() => {
+          // Date matching helper
+          const matchesDate = (dateVal) => {
+            if (!dateVal) return false;
+            const d = new Date(dateVal);
+            const filterDate = new Date(dailyReportDate);
+            return d.getFullYear() === filterDate.getFullYear() &&
+                   d.getMonth() === filterDate.getMonth() &&
+                   d.getDate() === filterDate.getDate();
+          };
+
+          // Helper to calculate GC dispatched quantity
+          const getGcDispatchedQty = (gcId) => {
+            let sum = 0;
+            gdmList.forEach(gdm => {
+              if (gdm.items) {
+                gdm.items.forEach(item => {
+                  if (item.goodsConsignmentId === gcId) {
+                    sum += item.desp || 0;
+                  }
+                });
+              }
+            });
+            return sum;
+          };
+
+          // Extract unique destinations and godowns from data
+          const uniqueDestinations = Array.from(new Set([
+            ...consignees.map(c => c.destination),
+            ...consignments.map(c => c.toCity)
+          ].filter(Boolean))).sort();
+
+          const uniqueGodowns = Array.from(new Set(consignments.map(c => c.godown).filter(Boolean))).sort();
+
+          // Prepare report filters and data
+          let reportData = [];
+          let reportTitle = '';
+          let headers = [];
+          let rows = [];
+
+          if (selectedReportType === 'totalBooking') {
+            reportData = consignments.filter(c => matchesDate(c.date));
+            reportTitle = `Total Booking Report - ${new Date(dailyReportDate).toLocaleDateString('en-GB')}`;
+            headers = ['GC No', 'Date', 'Consignor (Seller)', 'Consignee (Buyer)', 'Origin ➡️ Destination', 'Boxes', 'Total Amt', 'Payment Status', 'ST Payable By', 'Approval Status'];
+            rows = reportData.map(c => [
+              c.gcNumber,
+              new Date(c.date).toLocaleDateString('en-GB'),
+              c.consignor?.name || 'N/A',
+              c.consignee?.name || 'N/A',
+              `${c.fromCity} ➡️ ${c.toCity}`,
+              `${c.quantity} boxes`,
+              `₹${c.total.toFixed(2)}`,
+              c.paymentStatus,
+              c.serviceTaxPayableBy,
+              c.approvalStatus
+            ]);
+          } 
+          else if (selectedReportType === 'partyWiseBooking') {
+            reportData = consignments.filter(c => matchesDate(c.date) && (c.consignorId === selectedReportParty || c.consigneeId === selectedReportParty));
+            const partyName = [...consignors, ...consignees].find(p => p.id === selectedReportParty)?.name || 'N/A';
+            reportTitle = `PartyWise Booking Report (${partyName}) - ${new Date(dailyReportDate).toLocaleDateString('en-GB')}`;
+            headers = ['GC No', 'Date', 'Consignor', 'Consignee', 'Route', 'Boxes', 'Total Amt', 'Payment Status', 'ST Payable By', 'Approval Status'];
+            rows = reportData.map(c => [
+              c.gcNumber,
+              new Date(c.date).toLocaleDateString('en-GB'),
+              c.consignor?.name || 'N/A',
+              c.consignee?.name || 'N/A',
+              `${c.fromCity} ➡️ ${c.toCity}`,
+              `${c.quantity} boxes`,
+              `₹${c.total.toFixed(2)}`,
+              c.paymentStatus,
+              c.serviceTaxPayableBy,
+              c.approvalStatus
+            ]);
+          }
+          else if (selectedReportType === 'multiplePartyBooking') {
+            reportData = consignments.filter(c => matchesDate(c.date) && (selectedReportParties.includes(c.consignorId) || selectedReportParties.includes(c.consigneeId)));
+            reportTitle = `Multiple Party Booking Report - ${new Date(dailyReportDate).toLocaleDateString('en-GB')}`;
+            headers = ['GC No', 'Date', 'Consignor', 'Consignee', 'Route', 'Boxes', 'Total Amt', 'Payment Status', 'ST Payable By', 'Approval Status'];
+            rows = reportData.map(c => [
+              c.gcNumber,
+              new Date(c.date).toLocaleDateString('en-GB'),
+              c.consignor?.name || 'N/A',
+              c.consignee?.name || 'N/A',
+              `${c.fromCity} ➡️ ${c.toCity}`,
+              `${c.quantity} boxes`,
+              `₹${c.total.toFixed(2)}`,
+              c.paymentStatus,
+              c.serviceTaxPayableBy,
+              c.approvalStatus
+            ]);
+          }
+          else if (selectedReportType === 'despatchReport') {
+            reportData = gdmList.filter(d => matchesDate(d.gdmDate));
+            reportTitle = `Despatch Report - ${new Date(dailyReportDate).toLocaleDateString('en-GB')}`;
+            headers = ['GDM No', 'Date', 'Lorry Number', 'From City', 'To Destination', 'Lorry Capacity Load', 'Transporter Tax', 'Delivery Status'];
+            rows = reportData.map(d => [
+              d.gdmNumber,
+              new Date(d.gdmDate).toLocaleDateString('en-GB'),
+              `${d.lorry?.lorryNumber} (${d.lorry?.lorryName || 'N/A'})`,
+              d.fromCity,
+              d.toCity,
+              `${d.totalDesp} / ${d.totalQty} boxes`,
+              `₹${d.totalServiceTax.toFixed(2)}`,
+              d.deliveryStatus.toUpperCase()
+            ]);
+          }
+          else if (selectedReportType === 'partyWiseDespatch') {
+            reportData = gdmList.filter(d => matchesDate(d.gdmDate) && d.items?.some(item => {
+              const matchedGc = consignments.find(c => c.id === item.goodsConsignmentId);
+              return matchedGc && (matchedGc.consignorId === selectedReportParty || matchedGc.consigneeId === selectedReportParty);
+            }));
+            const partyName = [...consignors, ...consignees].find(p => p.id === selectedReportParty)?.name || 'N/A';
+            reportTitle = `PartyWise Despatch Report (${partyName}) - ${new Date(dailyReportDate).toLocaleDateString('en-GB')}`;
+            headers = ['GDM No', 'Date', 'Lorry Number', 'From City', 'To Destination', 'Lorry Capacity Load', 'Transporter Tax', 'Delivery Status'];
+            rows = reportData.map(d => [
+              d.gdmNumber,
+              new Date(d.gdmDate).toLocaleDateString('en-GB'),
+              `${d.lorry?.lorryNumber} (${d.lorry?.lorryName || 'N/A'})`,
+              d.fromCity,
+              d.toCity,
+              `${d.totalDesp} / ${d.totalQty} boxes`,
+              `₹${d.totalServiceTax.toFixed(2)}`,
+              d.deliveryStatus.toUpperCase()
+            ]);
+          }
+          else if (selectedReportType === 'multiplePartyDespatch') {
+            reportData = gdmList.filter(d => matchesDate(d.gdmDate) && d.items?.some(item => {
+              const matchedGc = consignments.find(c => c.id === item.goodsConsignmentId);
+              return matchedGc && (selectedReportParties.includes(matchedGc.consignorId) || selectedReportParties.includes(matchedGc.consigneeId));
+            }));
+            reportTitle = `Multiple Party Despatch Report - ${new Date(dailyReportDate).toLocaleDateString('en-GB')}`;
+            headers = ['GDM No', 'Date', 'Lorry Number', 'From City', 'To Destination', 'Lorry Capacity Load', 'Transporter Tax', 'Delivery Status'];
+            rows = reportData.map(d => [
+              d.gdmNumber,
+              new Date(d.gdmDate).toLocaleDateString('en-GB'),
+              `${d.lorry?.lorryNumber} (${d.lorry?.lorryName || 'N/A'})`,
+              d.fromCity,
+              d.toCity,
+              `${d.totalDesp} / ${d.totalQty} boxes`,
+              `₹${d.totalServiceTax.toFixed(2)}`,
+              d.deliveryStatus.toUpperCase()
+            ]);
+          }
+          else if (selectedReportType === 'totalStock') {
+            reportData = consignments.filter(c => {
+              if (c.approvalStatus !== 'APPROVED') return false;
+              const dispatched = getGcDispatchedQty(c.id);
+              return (c.quantity - dispatched) > 0;
+            }).map(c => ({ ...c, dispatchedQty: getGcDispatchedQty(c.id), remainingStock: c.quantity - getGcDispatchedQty(c.id) }));
+            reportTitle = `Total Stock Report (Remaining in Godown)`;
+            headers = ['GC No', 'Date', 'Consignor', 'Consignee', 'Destination', 'Godown', 'Original Pkgs', 'Dispatched Pkgs', 'Stock Pkgs'];
+            rows = reportData.map(c => [
+              c.gcNumber,
+              new Date(c.date).toLocaleDateString('en-GB'),
+              c.consignor?.name || 'N/A',
+              c.consignee?.name || 'N/A',
+              c.toCity,
+              c.godown || 'N/A',
+              `${c.quantity} pkgs`,
+              `${c.dispatchedQty} pkgs`,
+              `${c.remainingStock} pkgs`
+            ]);
+          }
+          else if (selectedReportType === 'partyWiseStock') {
+            reportData = consignments.filter(c => {
+              if (c.approvalStatus !== 'APPROVED') return false;
+              if (c.consignorId !== selectedReportParty && c.consigneeId !== selectedReportParty) return false;
+              const dispatched = getGcDispatchedQty(c.id);
+              return (c.quantity - dispatched) > 0;
+            }).map(c => ({ ...c, dispatchedQty: getGcDispatchedQty(c.id), remainingStock: c.quantity - getGcDispatchedQty(c.id) }));
+            const partyName = [...consignors, ...consignees].find(p => p.id === selectedReportParty)?.name || 'N/A';
+            reportTitle = `PartyWise Stock Report (${partyName})`;
+            headers = ['GC No', 'Date', 'Consignor', 'Consignee', 'Destination', 'Godown', 'Original Pkgs', 'Dispatched Pkgs', 'Stock Pkgs'];
+            rows = reportData.map(c => [
+              c.gcNumber,
+              new Date(c.date).toLocaleDateString('en-GB'),
+              c.consignor?.name || 'N/A',
+              c.consignee?.name || 'N/A',
+              c.toCity,
+              c.godown || 'N/A',
+              `${c.quantity} pkgs`,
+              `${c.dispatchedQty} pkgs`,
+              `${c.remainingStock} pkgs`
+            ]);
+          }
+          else if (selectedReportType === 'multiplePartyStock') {
+            reportData = consignments.filter(c => {
+              if (c.approvalStatus !== 'APPROVED') return false;
+              if (!selectedReportParties.includes(c.consignorId) && !selectedReportParties.includes(c.consigneeId)) return false;
+              const dispatched = getGcDispatchedQty(c.id);
+              return (c.quantity - dispatched) > 0;
+            }).map(c => ({ ...c, dispatchedQty: getGcDispatchedQty(c.id), remainingStock: c.quantity - getGcDispatchedQty(c.id) }));
+            reportTitle = `Multiple Party Stock Report`;
+            headers = ['GC No', 'Date', 'Consignor', 'Consignee', 'Destination', 'Godown', 'Original Pkgs', 'Dispatched Pkgs', 'Stock Pkgs'];
+            rows = reportData.map(c => [
+              c.gcNumber,
+              new Date(c.date).toLocaleDateString('en-GB'),
+              c.consignor?.name || 'N/A',
+              c.consignee?.name || 'N/A',
+              c.toCity,
+              c.godown || 'N/A',
+              `${c.quantity} pkgs`,
+              `${c.dispatchedQty} pkgs`,
+              `${c.remainingStock} pkgs`
+            ]);
+          }
+          else if (selectedReportType === 'destinationWiseStock') {
+            reportData = consignments.filter(c => {
+              if (c.approvalStatus !== 'APPROVED') return false;
+              if (c.toCity !== selectedReportDestination) return false;
+              const dispatched = getGcDispatchedQty(c.id);
+              return (c.quantity - dispatched) > 0;
+            }).map(c => ({ ...c, dispatchedQty: getGcDispatchedQty(c.id), remainingStock: c.quantity - getGcDispatchedQty(c.id) }));
+            reportTitle = `DestinationWise Stock Report (${selectedReportDestination})`;
+            headers = ['GC No', 'Date', 'Consignor', 'Consignee', 'Destination', 'Godown', 'Original Pkgs', 'Dispatched Pkgs', 'Stock Pkgs'];
+            rows = reportData.map(c => [
+              c.gcNumber,
+              new Date(c.date).toLocaleDateString('en-GB'),
+              c.consignor?.name || 'N/A',
+              c.consignee?.name || 'N/A',
+              c.toCity,
+              c.godown || 'N/A',
+              `${c.quantity} pkgs`,
+              `${c.dispatchedQty} pkgs`,
+              `${c.remainingStock} pkgs`
+            ]);
+          }
+          else if (selectedReportType === 'multipleDestinationStock') {
+            reportData = consignments.filter(c => {
+              if (c.approvalStatus !== 'APPROVED') return false;
+              if (!selectedReportDestinations.includes(c.toCity)) return false;
+              const dispatched = getGcDispatchedQty(c.id);
+              return (c.quantity - dispatched) > 0;
+            }).map(c => ({ ...c, dispatchedQty: getGcDispatchedQty(c.id), remainingStock: c.quantity - getGcDispatchedQty(c.id) }));
+            reportTitle = `Multiple Destination wise Stock Report`;
+            headers = ['GC No', 'Date', 'Consignor', 'Consignee', 'Destination', 'Godown', 'Original Pkgs', 'Dispatched Pkgs', 'Stock Pkgs'];
+            rows = reportData.map(c => [
+              c.gcNumber,
+              new Date(c.date).toLocaleDateString('en-GB'),
+              c.consignor?.name || 'N/A',
+              c.consignee?.name || 'N/A',
+              c.toCity,
+              c.godown || 'N/A',
+              `${c.quantity} pkgs`,
+              `${c.dispatchedQty} pkgs`,
+              `${c.remainingStock} pkgs`
+            ]);
+          }
+          else if (selectedReportType === 'godownWiseStock') {
+            reportData = consignments.filter(c => {
+              if (c.approvalStatus !== 'APPROVED') return false;
+              if (c.godown !== selectedReportGodown) return false;
+              const dispatched = getGcDispatchedQty(c.id);
+              return (c.quantity - dispatched) > 0;
+            }).map(c => ({ ...c, dispatchedQty: getGcDispatchedQty(c.id), remainingStock: c.quantity - getGcDispatchedQty(c.id) }));
+            reportTitle = `GodownWise Stock Report (${selectedReportGodown})`;
+            headers = ['GC No', 'Date', 'Consignor', 'Consignee', 'Destination', 'Godown', 'Original Pkgs', 'Dispatched Pkgs', 'Stock Pkgs'];
+            rows = reportData.map(c => [
+              c.gcNumber,
+              new Date(c.date).toLocaleDateString('en-GB'),
+              c.consignor?.name || 'N/A',
+              c.consignee?.name || 'N/A',
+              c.toCity,
+              c.godown || 'N/A',
+              `${c.quantity} pkgs`,
+              `${c.dispatchedQty} pkgs`,
+              `${c.remainingStock} pkgs`
+            ]);
+          }
+          else if (selectedReportType === 'serviceTaxReport') {
+            reportData = consignments.filter(c => matchesDate(c.date));
+            reportTitle = `Service Tax Report - ${new Date(dailyReportDate).toLocaleDateString('en-GB')}`;
+            headers = ['GC No', 'Date', 'Consignor', 'Consignee', 'ST Payable By', 'Taxable Val (Freight)', 'Tax %', 'Service Tax Amt', 'Total Billing'];
+            rows = reportData.map(c => [
+              c.gcNumber,
+              new Date(c.date).toLocaleDateString('en-GB'),
+              c.consignor?.name || 'N/A',
+              c.consignee?.name || 'N/A',
+              c.serviceTaxPayableBy,
+              `₹${c.freight.toFixed(2)}`,
+              `${c.serviceTaxPercent}%`,
+              `₹${c.serviceTax.toFixed(2)}`,
+              `₹${c.total.toFixed(2)}`
+            ]);
+          }
+          else if (selectedReportType === 'gcPending') {
+            reportData = consignments.filter(c => c.approvalStatus === 'PENDING_APPROVAL');
+            reportTitle = `GC Pending Report`;
+            headers = ['GC No', 'Date', 'Consignor', 'Consignee', 'Route', 'Boxes', 'Total Amt', 'ST Payable By', 'Approval Status'];
+            rows = reportData.map(c => [
+              c.gcNumber,
+              new Date(c.date).toLocaleDateString('en-GB'),
+              c.consignor?.name || 'N/A',
+              c.consignee?.name || 'N/A',
+              `${c.fromCity} ➡️ ${c.toCity}`,
+              `${c.quantity} boxes`,
+              `₹${c.total.toFixed(2)}`,
+              c.serviceTaxPayableBy,
+              c.approvalStatus
+            ]);
+          }
+
+          const handleTriggerPrintReport = () => {
+            setSelectedPrintReport({ title: reportTitle, headers, rows });
+            setTimeout(() => {
+              window.print();
+              setSelectedPrintReport(null);
+            }, 300);
+          };
+
+          const isBookingReport = selectedReportType.includes('Booking') || selectedReportType === 'totalBooking' || selectedReportType === 'gcPending';
+          const isDespatchReport = selectedReportType.includes('Despatch') || selectedReportType === 'despatchReport';
+          const isStockReport = selectedReportType.includes('Stock') || selectedReportType === 'totalStock';
+          const isTaxReport = selectedReportType === 'serviceTaxReport';
+
+          const showDateSelector = !isStockReport && selectedReportType !== 'gcPending';
+
+          const reportOptions = [
+            { value: 'totalBooking', label: 'PartyWise / Total Booking Report' },
+            { value: 'partyWiseBooking', label: 'PartyWise Booking Report' },
+            { value: 'multiplePartyBooking', label: 'Multiple Party Booking Report' },
+            { value: 'despatchReport', label: 'Despatch Report' },
+            { value: 'partyWiseDespatch', label: 'PartyWise Despatch Report' },
+            { value: 'multiplePartyDespatch', label: 'Multiple Party Despatch Report' },
+            { value: 'totalStock', label: 'Total Stock' },
+            { value: 'partyWiseStock', label: 'PartyWise Stock Report' },
+            { value: 'multiplePartyStock', label: 'Multiple Party Stock Report' },
+            { value: 'destinationWiseStock', label: 'DestinationWise Stock Report' },
+            { value: 'multipleDestinationStock', label: 'Multiple Destination wise Stock Report' },
+            { value: 'godownWiseStock', label: 'GodownWise Stock Report' },
+            { value: 'serviceTaxReport', label: 'Service Tax Report' },
+            { value: 'gcPending', label: 'GC Pending Report' },
+          ];
+
+          return (
+            <div className="card no-print">
+              <div style={{ borderBottom: '2px solid var(--border)', paddingBottom: 16, marginBottom: 20 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+                  <h2 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>📊 Interactive Reports Panel</h2>
+                  
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                    {showDateSelector && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <label style={{ margin: 0, fontWeight: 'bold', fontSize: 13, color: '#000' }}>Report Date:</label>
+                        <input 
+                          type="date" 
+                          className="form-control" 
+                          style={{ width: 150, display: 'inline-block', padding: '4px 8px', fontSize: 13 }} 
+                          value={dailyReportDate} 
+                          onChange={(e) => setDailyReportDate(e.target.value)} 
+                        />
+                      </div>
+                    )}
+                    <button onClick={handleTriggerPrintReport} className="btn btn-success" style={{ padding: '6px 12px', fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}>
+                      🖨️ Print Report
+                    </button>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 16, background: 'rgba(0,0,0,0.02)', padding: 16, borderRadius: 8, border: '1px solid var(--border)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                      <label style={{ margin: 0, fontWeight: 'bold', fontSize: 13, color: '#000' }}>Select Report Type:</label>
+                      <select 
+                        className="form-control" 
+                        value={selectedReportType} 
+                        onChange={(e) => {
+                          setSelectedReportType(e.target.value);
+                          setSelectedReportParty('');
+                          setSelectedReportParties([]);
+                          setSelectedReportDestination('');
+                          setSelectedReportDestinations([]);
+                          setSelectedReportGodown('');
+                        }} 
+                        style={{ width: 260, borderColor: '#b55a00' }}
+                      >
+                        {reportOptions.map(opt => (
+                          <option key={opt.value} value={opt.value}>{opt.label}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {/* Conditional Filter: Single Party Selector */}
+                    {(selectedReportType === 'partyWiseBooking' || selectedReportType === 'partyWiseDespatch' || selectedReportType === 'partyWiseStock') && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                        <label style={{ margin: 0, fontWeight: 'bold', fontSize: 13, color: '#000' }}>Select Party:</label>
+                        <select 
+                          className="form-control" 
+                          value={selectedReportParty} 
+                          onChange={(e) => setSelectedReportParty(e.target.value)} 
+                          style={{ width: 260, borderColor: '#b55a00' }}
+                        >
+                          <option value="">-- Choose Party --</option>
+                          <optgroup label="Consignors (Sellers)">
+                            {consignors.map(c => (
+                              <option key={c.id} value={c.id}>{c.name}</option>
+                            ))}
+                          </optgroup>
+                          <optgroup label="Consignees (Buyers)">
+                            {consignees.map(c => (
+                              <option key={c.id} value={c.id}>{c.name}</option>
+                            ))}
+                          </optgroup>
+                        </select>
+                      </div>
+                    )}
+
+                    {/* Conditional Filter: Single Destination Selector */}
+                    {selectedReportType === 'destinationWiseStock' && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                        <label style={{ margin: 0, fontWeight: 'bold', fontSize: 13, color: '#000' }}>Select Destination:</label>
+                        <select 
+                          className="form-control" 
+                          value={selectedReportDestination} 
+                          onChange={(e) => setSelectedReportDestination(e.target.value)} 
+                          style={{ width: 260, borderColor: '#b55a00' }}
+                        >
+                          <option value="">-- Choose Destination --</option>
+                          {uniqueDestinations.map(d => (
+                            <option key={d} value={d}>{d}</option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+
+                    {/* Conditional Filter: Single Godown Selector */}
+                    {selectedReportType === 'godownWiseStock' && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                        <label style={{ margin: 0, fontWeight: 'bold', fontSize: 13, color: '#000' }}>Select Godown:</label>
+                        <select 
+                          className="form-control" 
+                          value={selectedReportGodown} 
+                          onChange={(e) => setSelectedReportGodown(e.target.value)} 
+                          style={{ width: 260, borderColor: '#b55a00' }}
+                        >
+                          <option value="">-- Choose Godown --</option>
+                          {uniqueGodowns.map(g => (
+                            <option key={g} value={g}>{g}</option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Conditional Filter: Multiple Parties Checkbox List */}
+                  {(selectedReportType === 'multiplePartyBooking' || selectedReportType === 'multiplePartyDespatch' || selectedReportType === 'multiplePartyStock') && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                      <label style={{ margin: 0, fontWeight: 'bold', fontSize: 13, color: '#000' }}>Select Multiple Parties (Select at least one):</label>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 8, maxHeight: 120, overflowY: 'auto', border: '1px solid var(--border)', padding: 10, borderRadius: 6, background: '#fff' }}>
+                        {[
+                          ...consignors.map(c => ({ ...c, type: 'Consignor' })),
+                          ...consignees.map(c => ({ ...c, type: 'Consignee' }))
+                        ].map(party => {
+                          const isChecked = selectedReportParties.includes(party.id);
+                          return (
+                            <label key={party.id} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, cursor: 'pointer', margin: 0, color: '#000' }}>
+                              <input 
+                                type="checkbox" 
+                                checked={isChecked} 
+                                onChange={() => {
+                                  if (isChecked) {
+                                    setSelectedReportParties(selectedReportParties.filter(id => id !== party.id));
+                                  } else {
+                                    setSelectedReportParties([...selectedReportParties, party.id]);
+                                  }
+                                }} 
+                              />
+                              {party.name} ({party.type})
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Conditional Filter: Multiple Destinations Checkbox List */}
+                  {selectedReportType === 'multipleDestinationStock' && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                      <label style={{ margin: 0, fontWeight: 'bold', fontSize: 13, color: '#000' }}>Select Multiple Destinations:</label>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 8, maxHeight: 120, overflowY: 'auto', border: '1px solid var(--border)', padding: 10, borderRadius: 6, background: '#fff' }}>
+                        {uniqueDestinations.map(dest => {
+                          const isChecked = selectedReportDestinations.includes(dest);
+                          return (
+                            <label key={dest} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, cursor: 'pointer', margin: 0, color: '#000' }}>
+                              <input 
+                                type="checkbox" 
+                                checked={isChecked} 
+                                onChange={() => {
+                                  if (isChecked) {
+                                    setSelectedReportDestinations(selectedReportDestinations.filter(d => d !== dest));
+                                  } else {
+                                    setSelectedReportDestinations([...selectedReportDestinations, dest]);
+                                  }
+                                }} 
+                              />
+                              {dest}
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Metrics Summary inside Panel */}
+              <div className="grid-3" style={{ gap: 16, marginBottom: 20 }}>
+                <div className="card" style={{ background: '#ebf5fb', border: '1px solid #aec6cf', padding: 12, borderRadius: 8, margin: 0 }}>
+                  <h4 style={{ margin: '0 0 4px 0', color: '#1b4f72', fontSize: 14 }}>Active Report</h4>
+                  <p style={{ fontSize: 16, fontWeight: 'bold', margin: 0, color: '#1b4f72' }}>
+                    {reportOptions.find(opt => opt.value === selectedReportType)?.label}
+                  </p>
+                </div>
+                <div className="card" style={{ background: '#fef9e7', border: '1px solid #f9e79f', padding: 12, borderRadius: 8, margin: 0 }}>
+                  <h4 style={{ margin: '0 0 4px 0', color: '#7d6608', fontSize: 14 }}>Records Count</h4>
+                  <p style={{ fontSize: 24, fontWeight: 'bold', margin: 0, color: '#7d6608' }}>
+                    {reportData.length} records
+                  </p>
+                </div>
+                <div className="card" style={{ background: '#eafaf1', border: '1px solid #abebc6', padding: 12, borderRadius: 8, margin: 0 }}>
+                  <h4 style={{ margin: '0 0 4px 0', color: '#196f3d', fontSize: 14 }}>
+                    {isStockReport ? 'Total Stock Pkgs' : isDespatchReport ? 'Total Dispatched' : 'Total Value'}
+                  </h4>
+                  <p style={{ fontSize: 24, fontWeight: 'bold', margin: 0, color: '#196f3d' }}>
+                    {isStockReport ? (
+                      `${reportData.reduce((sum, item) => sum + (item.remainingStock || 0), 0)} pkgs`
+                    ) : isDespatchReport ? (
+                      `${reportData.reduce((sum, item) => sum + (item.totalDesp || 0), 0)} boxes`
+                    ) : (
+                      `₹${reportData.reduce((sum, item) => sum + (item.total || 0), 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}`
+                    )}
+                  </p>
+                </div>
+              </div>
+
+              {/* Data Table */}
+              <h3 style={{ margin: '0 0 12px 0', color: '#000' }}>📋 {reportTitle}</h3>
+              <div className="table-container">
+                <table>
+                  <thead>
+                    <tr>
+                      {headers.map((h, i) => (
+                        <th key={i}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {/* Render Booking Reports & Pending */}
+                    {(isBookingReport) && reportData.map(c => (
+                      <tr key={c.id}>
+                        <td style={{ fontWeight: 'bold' }}>{c.gcNumber}</td>
+                        <td>{new Date(c.date).toLocaleDateString('en-GB')}</td>
+                        <td>{c.consignor?.name}</td>
+                        <td>{c.consignee?.name}</td>
+                        <td>{c.fromCity} ➡️ {c.toCity}</td>
+                        <td>{c.quantity} boxes</td>
+                        <td style={{ fontWeight: 'bold' }}>₹{c.total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                        <td><span className="badge badge-primary">{c.paymentStatus}</span></td>
+                        <td><span className="badge badge-secondary">{c.serviceTaxPayableBy}</span></td>
+                        <td>
+                          <span className={`badge ${c.approvalStatus === 'APPROVED' ? 'badge-success' : c.approvalStatus === 'PENDING_APPROVAL' ? 'badge-warning' : 'badge-danger'}`}>
+                            {c.approvalStatus}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+
+                    {/* Render Despatch Reports */}
+                    {isDespatchReport && reportData.map(d => (
+                      <tr key={d.id}>
+                        <td style={{ fontWeight: 'bold' }}>{d.gdmNumber}</td>
+                        <td>{new Date(d.gdmDate).toLocaleDateString('en-GB')}</td>
+                        <td>{d.lorry?.lorryNumber} ({d.lorry?.lorryName || 'N/A'})</td>
+                        <td>{d.fromCity}</td>
+                        <td>{d.toCity}</td>
+                        <td><strong>{d.totalDesp}</strong> / {d.totalQty} boxes</td>
+                        <td>₹{d.totalServiceTax.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                        <td>
+                          <span className={`badge ${d.deliveryStatus === 'delivered' ? 'badge-success' : d.deliveryStatus === 'in_transit' ? 'badge-primary' : 'badge-warning'}`}>
+                            {d.deliveryStatus.toUpperCase()}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+
+                    {/* Render Stock Reports */}
+                    {isStockReport && reportData.map(c => (
+                      <tr key={c.id}>
+                        <td style={{ fontWeight: 'bold' }}>{c.gcNumber}</td>
+                        <td>{new Date(c.date).toLocaleDateString('en-GB')}</td>
+                        <td>{c.consignor?.name}</td>
+                        <td>{c.consignee?.name}</td>
+                        <td>{c.toCity}</td>
+                        <td>{c.godown || 'N/A'}</td>
+                        <td>{c.quantity} pkgs</td>
+                        <td>{c.dispatchedQty} pkgs</td>
+                        <td style={{ fontWeight: 'bold', color: 'var(--accent)' }}>{c.remainingStock} pkgs</td>
+                      </tr>
+                    ))}
+
+                    {/* Render Service Tax Report */}
+                    {isTaxReport && reportData.map(c => (
+                      <tr key={c.id}>
+                        <td style={{ fontWeight: 'bold' }}>{c.gcNumber}</td>
+                        <td>{new Date(c.date).toLocaleDateString('en-GB')}</td>
+                        <td>{c.consignor?.name}</td>
+                        <td>{c.consignee?.name}</td>
+                        <td style={{ fontWeight: 'bold' }}>{c.serviceTaxPayableBy}</td>
+                        <td>₹{c.freight.toFixed(2)}</td>
+                        <td>{c.serviceTaxPercent}%</td>
+                        <td style={{ fontWeight: 'bold' }}>₹{c.serviceTax.toFixed(2)}</td>
+                        <td style={{ fontWeight: 'bold' }}>₹{c.total.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                      </tr>
+                    ))}
+
+                    {reportData.length === 0 && (
+                      <tr>
+                        <td colSpan={headers.length} style={{ textAlign: 'center', padding: 24, color: 'var(--text-muted)' }}>
+                          No records found matching the active filters.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          );
+        })()}
 
         {/* --- TAB: ADMIN APPROVALS & ACCESS CONTROL (Requirement 3, 5, 6) --- */}
         {activeTab === 'approvals' && (
@@ -2611,6 +3370,64 @@ export default function App() {
                   </tbody>
                 </table>
               </div>
+            </div>
+
+            {/* Mandatory Fields Configurator */}
+            <div className="card" style={{ marginTop: 24 }}>
+              <h3>⚙️ Configure Mandatory Fields for Goods Consignment (GC) / LR Form</h3>
+              <p style={{ color: 'var(--text-muted)', marginBottom: 16 }}>Select which fields are required. If a selected field is empty or zero, form submission will be blocked.</p>
+              
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 12, marginBottom: 20 }}>
+                {Object.keys(mandatoryFields).map((key) => {
+                  const displayNames = {
+                    consignorId: 'Consignor (Seller)',
+                    fromCity: 'Origin',
+                    consigneeId: 'Consignee (Buyer)',
+                    toCity: 'Destination',
+                    invoiceNo: 'Invoice No',
+                    invoiceDate: 'Invoice Date',
+                    value: 'Invoice value',
+                    mark: 'Mark',
+                    godown: 'Godown',
+                    delivery: 'Delivery Method',
+                    hamali: 'Hamali (₹)',
+                    stCharges: 'St. Charges (₹)',
+                    others: 'Others (₹)',
+                    charWt: 'Char: Wt (kg)',
+                    rateKg: 'Rate/Kg (₹)',
+                    quantity: 'Box Quantity',
+                    paymentStatus: 'Payment Status',
+                    saidToContainCode: 'Said To Contain',
+                    serviceTaxPayableBy: 'Service Tax Payable By',
+                    remarks: 'Remarks If Any'
+                  }
+                  return (
+                    <label key={key} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', color: '#000', fontSize: 14 }}>
+                      <input 
+                        type="checkbox" 
+                        checked={mandatoryFields[key]} 
+                        onChange={(e) => {
+                          const updated = { ...mandatoryFields, [key]: e.target.checked }
+                          setMandatoryFields(updated)
+                          localStorage.setItem('gcMandatoryFields', JSON.stringify(updated))
+                        }} 
+                      />
+                      {displayNames[key] || key}
+                    </label>
+                  )
+                })}
+              </div>
+              
+              <button 
+                onClick={() => {
+                  localStorage.setItem('gcMandatoryFields', JSON.stringify(mandatoryFields));
+                  alert('Mandatory field configuration saved successfully!');
+                }} 
+                className="btn btn-success" 
+                style={{ padding: '8px 16px', fontSize: 13 }}
+              >
+                💾 Save Configuration
+              </button>
             </div>
           </div>
         )}
@@ -3119,6 +3936,43 @@ export default function App() {
         )}
       </div>
     )}
+
+    {/* --- PRINT SHEET FOR REPORTS --- */}
+    {selectedPrintReport && (
+      <div className="printable-sheet">
+        <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '2px solid #000', paddingBottom: 8, marginBottom: 12 }}>
+          <div>
+            <h2 style={{ margin: 0, fontSize: 18, fontWeight: 'bold' }}>DEV ROAD LINES</h2>
+            <p style={{ margin: '2px 0', fontSize: 11 }}>SIVAKASI-626123</p>
+            <p style={{ margin: '2px 0', fontSize: 11, fontWeight: 'bold' }}>GSTIN: 33AAQFD6720J1ZA</p>
+          </div>
+          <div style={{ textAlign: 'right' }}>
+            <h3 style={{ margin: 0, textTransform: 'uppercase', fontSize: 14 }}>{selectedPrintReport.title}</h3>
+            <p style={{ margin: '2px 0', fontSize: 10 }}>Date: {new Date().toLocaleDateString('en-GB')}</p>
+          </div>
+        </div>
+
+        <table>
+          <thead>
+            <tr>
+              {selectedPrintReport.headers.map((h, idx) => (
+                <th key={idx}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {selectedPrintReport.rows.map((row, rIdx) => (
+              <tr key={rIdx}>
+                {row.map((cell, cIdx) => (
+                  <td key={cIdx}>{cell}</td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    )}
   </>
 )
 }
+

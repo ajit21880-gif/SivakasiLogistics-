@@ -130,10 +130,12 @@ router.post("/", authMiddleware, async (req: AuthRequest, res: Response) => {
     const data = GcSchema.parse(req.body);
 
     // Calculate figures
-    const freight = data.charWt * data.rateKg;
-    const serviceTax = freight * (data.serviceTaxPercent / 100);
-    // User requested Total = Cargo Value + Freight + Service Tax + Hamali + Stationary Charges + Others
-    const total = data.value + freight + serviceTax + data.hamali + data.stCharges + data.others;
+    const baseFreight = data.charWt * data.rateKg;
+    const computedServiceTax = baseFreight * (data.serviceTaxPercent / 100);
+    const freight = data.serviceTaxPayableBy === "Transporter" ? (baseFreight + computedServiceTax) : baseFreight;
+    const serviceTax = computedServiceTax;
+    // User requested Total = Cargo Value + Freight (with ST if transporter) + Hamali + Stationary Charges + Others
+    const total = data.value + freight + data.hamali + data.stCharges + data.others;
 
     // Generate unique GC Number (e.g., D02249)
     const count = await prisma.goodsConsignment.count();
@@ -209,9 +211,13 @@ router.put("/:id", authMiddleware, async (req: AuthRequest, res: Response) => {
     const others = data.others !== undefined ? data.others : existing.others;
     const serviceTaxPercent = data.serviceTaxPercent !== undefined ? data.serviceTaxPercent : existing.serviceTaxPercent;
 
-    const freight = charWt * rateKg;
-    const serviceTax = freight * (serviceTaxPercent / 100);
-    const total = value + freight + serviceTax + hamali + stCharges + others;
+    const baseFreight = charWt * rateKg;
+    const computedServiceTax = baseFreight * (serviceTaxPercent / 100);
+    const serviceTaxPayableBy = data.serviceTaxPayableBy !== undefined ? data.serviceTaxPayableBy : existing.serviceTaxPayableBy;
+    
+    const freight = serviceTaxPayableBy === "Transporter" ? (baseFreight + computedServiceTax) : baseFreight;
+    const serviceTax = computedServiceTax;
+    const total = value + freight + hamali + stCharges + others;
 
     // Staff changes trigger PENDING_APPROVAL status. Admin is auto-approved.
     const approvalStatus = req.userRole === "admin" ? "APPROVED" : "PENDING_APPROVAL";

@@ -104,6 +104,83 @@ router.post("/login", async (req: Request, res: Response) => {
   }
 });
 
+// POST /google - Google Authenticated SSO Login
+router.post("/google", async (req: Request, res: Response) => {
+  try {
+    const { idToken, email, name, role } = req.body;
+
+    if (!email) {
+      return res.status(400).json({ success: false, message: "Email is required" });
+    }
+
+    // Find or create User
+    let user = await prisma.user.findUnique({
+      where: { email }
+    });
+
+    if (!user) {
+      // Create user if not exists
+      // Generate default password hash since passwordHash is required
+      const defaultPasswordHash = await bcrypt.hash("GoogleAuthTempPass123!", 10);
+      
+      // Determine unique loginId
+      const roleStr = role || "staff";
+      const loginIdPrefix = roleStr === "admin" ? "ADM" : roleStr === "customer" ? "CST" : "STF";
+      const count = await prisma.user.count({ where: { role: roleStr } });
+      const loginId = `${loginIdPrefix}${String(count + 1).padStart(2, "0")}`;
+      
+      user = await prisma.user.create({
+        data: {
+          email,
+          phone: `GOOGLE-${Date.now().toString().slice(-6)}`,
+          passwordHash: defaultPasswordHash,
+          firstName: name ? name.split(" ")[0] : "Google",
+          lastName: name && name.split(" ").length > 1 ? name.split(" ").slice(1).join(" ") : "User",
+          role: roleStr,
+          loginId,
+          isApproved: true, // Google login is pre-approved for SSO convenience
+          isDefaultPassword: false,
+        }
+      });
+    }
+
+    // Verify Approval Status
+    if (!user.isApproved) {
+      return res.status(403).json({
+        success: false,
+        error: "PENDING_APPROVAL",
+        message: "Your registration is pending Admin approval. Please contact management.",
+      });
+    }
+
+    // Generate Token
+    const jwtSecret = process.env.JWT_SECRET || "sivakasi-logistics-super-secret-key-1234";
+    const token = jwt.sign({ userId: user.id }, jwtSecret, { expiresIn: "7d" });
+
+    res.json({
+      success: true,
+      message: "Login successful",
+      accessToken: token,
+      user: {
+        id: user.id,
+        email: user.email,
+        phone: user.phone,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        role: user.role,
+        loginId: user.loginId,
+        staffPermission: user.staffPermission,
+        isDefaultPassword: user.isDefaultPassword,
+        linkedConsignorId: user.linkedConsignorId,
+        linkedConsigneeId: user.linkedConsigneeId,
+      },
+    });
+  } catch (error) {
+    console.error("Google login error:", error);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
+});
+
 // POST /register - Create user (defaults to pending approval)
 router.post("/register", async (req: Request, res: Response) => {
   try {
